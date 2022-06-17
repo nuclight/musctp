@@ -12,7 +12,7 @@ The most important disctinctions of muSCTP from predecessor protocols (TCP, SCTP
 2. Generalizing traditional "Layer 3 is IP or IPv6 packet" to _tunneling over arbitrary protocols_ (UDP being just the simplest case, but it is easy to define a new tunnel type) and support for tunneling over **asymmetric protocols** - where server can't initiate packets on it's own but only can reply to client (e.g. exactly one client packet in HTTP/1.0 request and exactly one server's reply to it).
 3. There is no concept of "port" (except of in tunnel addresses) - there are "services" at association setup and ephemeral ids for subsequent packets.
 
-Encryption and message authentication are done in per-packet (IPSEC) style, because TLS does not satisfy such requirements.
+Encryption and message authentication are done in per-packet (IPsec) style, because TLS does not satisfy such requirements.
 
 Despite of such hard constraints, muSCTP offers less than in SCTP but still reasonable limits to user application:
 
@@ -34,7 +34,7 @@ The opposite use case is also true - this may be used in "peaceful" Internet, to
 
 ## Next step in evolution of transport protocols
 
-To give reader a very broad perspective, muSCTP could be described as borrowing and mixing concepts from SCTP, CoAP, DCCP, SST, TLS, IPSEC/IKEv2, Multilink PPP, `sysctl()`, MQTT and even X11.
+To give reader a very broad perspective, muSCTP could be described as borrowing and mixing concepts from SCTP, CoAP, DCCP, SST, TLS, IPsec/IKEv2, Multilink PPP, `sysctl()`, MQTT and even X11.
 
 ### From a higher (application) level view
 
@@ -50,7 +50,7 @@ muSCTP is a Host-to-Host protocol, and it is agnostic to underlying protocol - l
 
 Instead of rigid binding "Layer 4 packet has 16-bit port number and goes directly into Layer 3 packet, and only IPv4 or IPv6", muSCTP eliminates the problem of managing finite 16-bit number port space, blurry divided to public and ephemeral parts, by offering an up to 16-byte "service name" at connection setup and pair of 29-bit numbers serving like "ephemeral ports" later. Then, muSCTP packet is encapsulated into "tunnel protocol" packet, selected from supported "tunnel backends".
 
-In simple and understandable case, a "tunnel" may be just several fields in UDP payload - and tunnel address will, of course, have "IP:port" pair. This is just how QUIC or SCTP tunneling over port 9899 [RFC 6951] works.
+In simple and understandable case, a "tunnel" may be just several fields in UDP payload - and tunnel address will, of course, have "IP:port" pair. This is just how QUIC, or SCTP tunneling over port 9899 [RFC 6951], or DCCP-UDP Encapsulation over port 6511 [RFC 6773] works.
 
 But it is also could be encapsulated directly into IP datagram, into Ethernet frame, or even some other application protocol like HTTP - a "tunnel" specification and implementation must provide way how to do this. Tunnel addresses are given as standard `sockaddr_storage` structures (up to 128 bytes), and an endpoint can have several of them, possibly of different protocols, at the same time.
 
