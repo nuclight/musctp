@@ -1,5 +1,35 @@
 # muSCTP: Multiflow Unsymmetric Sessionful Concise Tunneled Protocol
 
+Ranging network protocols (boundaries really are blurred) by upper scale:
+
+```
+      Very      . Low end     . Middle    . Higher   .   Very      . Ultra High
+   constrained  .             . (today)   . end      . Highload    . (future)
+                .             .           .          .             .
+   IoT/Embedded . older hw    . casual    . low-end  . Big DC      .
+                . and sw,     . user's    . servers, . servers,    .
+                . future      . desktop   . VMs      . HPC clus-   .
+                . embedded    .           .          . ters        .
+                .             .           .          .             .
+   < 1 Mbps,    . 10-100 Mbps . 1 Gbps,   . 10 Gbps, . 40-800 Gbps . > 8 Tbps
+   MTU 60-128   . IPv4        . IPv4/IPv6 . IPv4/6   . IPv6/custom .
+   Bytes        \__ MTU 576-1500 Bytes __/ \_ MTU 1500-9000 Bytes _/
+                .             .           .          .             .
+   |<------ CoAP ------>|     .           .          .             .
+                .             .           .          .             .
+             |<----------------------- TCP ----------------------->|
+                .             .           .          .             .
+          |<------------------------ muSCTP ------------------------>|
+                .             .           .          .             .
+                .   |<--------------------- SCTP --------------------->|
+                .             .           .          .             .
+                .     |<--------------------- DCCP --------------------->|
+                .             .           .          .             .
+                .         |<-------------------- QUIC -------------------->|
+                .             .           .          .             .
+   |<-------x-----x--- custom protocols per task / field ---x--------x------->|
+```
+
 ### Message-oriented transport and session protocol suitable for IoT and censorship circumventing
 
 This is a general-purpose OSI Layer 4 (Transport) and Layer 5 (Session) protocol, offering to applications both a message-oriented transport, like SCTP, and unstructured bytestream transport, like TCP or QUIC (in fact, it may be viewed as "QUIC done right").
