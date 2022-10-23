@@ -1168,7 +1168,7 @@ Huffman - 0 for Class=Auth, 5 bits max / 1 byte? но там же 4
 11001	 - 256	ADDRS_SERVER
 11010	 - 256	GENERIC_FEATURES
 11011	 - 256	ADDRS_CLIENT	??? less bits?
-11100	 - 256	LINK_VARS	??? less bits? not, link, ASSOC?
+11100	 - 256	LINK_VARS	??? less bits? name not link, ASSOC?
 11101	 - 256	SESSION_VARS	??? less bits?
 11110	 - 256
 111110	 - 128	ENCRYPTION_ALGO
@@ -1184,43 +1184,41 @@ TODO
         0   |    0    | a NULL
         1   |    0    | empty (zero-length) string
         2   |    1    | string with length 1
-       3   |    1 TBD| a 8-bit atom, as 8-bit unsigned integer
+        3   |    1    | a 8-bit atom, as 8-bit unsigned integer
         4   |    0    | the integer 0 and boolean false
         5   |    0    | the integer 1 and boolean true
-        6   |    1    | a Type Tag, as 8-bit unsigned integer
+        6   |    0    | the integer 2
         7   |    0    | Special Parser Type Modifier
         8   |    1    | an 8-bit unsigned integer
         9   |    1    | an 8-bit twos-complement integer
      -------+---------+-------------------------------------------
       10 a0 |    2    | a 16-bit atom, as big endian 16-bit unsigned integer
-       3   |    0    | the integer -1, or 0xFF..FF if unsigned is meant
-      11 a1 |    0    | the integer 2 ??? TBD reserved?
+      11 a1 |    0    | the integer -1, or 0xFF..FF if unsigned is meant
       12 a2 |    2    | a string 2 bytes in length
       13 a3 |    3    | a string 3 bytes in length
       14 a4 |    4    | a string 4 bytes in length
       15 a5 |    5    | a string 5 bytes in length
       16 a6 |    6    | a string 6 bytes in length
       17 a7 |    7    | a string 7 bytes in length
-      18 a8 |    2    | a big-endian 16-bit twos-complement integer
-      19 a9 |    3    | a big-endian 24-bit twos-complement integer
-      20 aa |    4    | a big-endian 32-bit twos-complement integer
-      21 ab |    0    | Type Tag 0 ??? TBD
-      22 ac |    2    | a Type Tag, as big endian 16-bit unsigned integer
-      23 ad |    2    | a big-endian 16-bit unsigned integer
-      24 ae |    4    | a big-endian 32-bit unsigned integer
+      18 a8 |    2    | a big-endian 16-bit unsigned integer
+      19 a9 |    4    | a big-endian 32-bit unsigned integer
+      20 aa |    0    | Begin of sub-CBAR list
+      21 ab |    0    | End of sub-CBAR list
+      22 ac |    2    | a big-endian 16-bit twos-complement integer
+      23 ad |    3    | a big-endian 24-bit twos-complement integer
+      24 ae |    4    | a big-endian 32-bit twos-complement integer
       25 af |    2    | a big-endian IEEE 754 Half-Precision Float (16-bit)
      -------+---------+-------------------------------------------
      26 b00 |    4    | a big-endian IEEE 754 Single-Precision Float (32-bit)
      27 b01 |    8    | a big-endian IEEE 754 Double-Precision Float (64-bit)
      28 b02 |    8    | a big-endian 64-bit unsigned integer
-     29 b03 |    4    | a Type Tag, as big endian 32-bit unsigned integer
-     30 b04 |    5    | a big-endian 40-bit twos-complement integer
-     31 b05 |    6    | a big-endian 48-bit twos-complement integer
-     32 b06 |    7    | an mpint of length 7
-     33 b07 |    8    | a big-endian 64-bit twos-complement integer
+     29 b03 |    8    | a big-endian 64-bit twos-complement integer
+     30 b04 |    ?    | Reserved
+     31 b05 |    5    | a big-endian 40-bit twos-complement integer
+     32 b06 |    6    | a big-endian 48-bit twos-complement integer
+     33 b07 |    7    | a big-endian 56-bit twos-complement integer
       N>=34 |   N-26  | a string with length N-26 (8 bytes or more)
 
- ? Type Tag 32 will look as 0xb06, resembling Major Type 6 in CBOR, and
    strings with lengths 8..255 will look from 0xb08 to 0xbff, so length is
    observable in low byte, and for strings with lengths 1..7 length is
    observable in low nibble
@@ -1254,8 +1252,12 @@ TBD sth in top 2 bits of OID: either content query or name query,
 limit/offset/name1/name2/.../name8 are always in CBAR arguments
 
 TBD a counter for sub-list instead of Nested CBAR? e.g for more than one Presentation Layer argument (e.g. zlib dict and CBOR dict)
+- which variant, counter or start/stop code ?
+- make one element equal to list of 1, for extensions without list bracketing / saving space ? not simple to parse
 TBD seems that mpint not needed, just encapsulate SSH packet
 TBD indefinite=concatenated strings in CBAR for Atom compression parts of, e.g. SSH packet?
+
+TBD lrepeat (reuires 2 args - count and N elements)
 
 TODO
 
@@ -1300,7 +1302,7 @@ TBD клиент на MSS=24 может послать два пакета, ра
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |Ver|0|                      Initiate Tag                       |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |mIS|mOS|Ch|IRW|      Optional Parameters
+     |mIS|mOS|mCh|IRW|      Optional Parameters
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.....
 
   Формат данных пакета INIT_ACK от сервера:
@@ -1327,7 +1329,9 @@ TODO нет, 2-битные mIS, OS, Ch от клиента - экспонент
   в фиксированном заголовке, на шаге 3 и далее - помещает туда полученный от
   сервера Initiate Tag. То же самое делает сервер, то есть он ДОЛЖЕН в ответе
   на ECHO поместить в свой Verification Tag значение Initiate Tag от клиента.
-  
+
+Tag MUST be different from client and server
+
   То есть, клиент и сервер помещают значения, полученные друг от друга - то
   есть ожидаемые другой стороной, и далее эти значения НЕ МЕНЯЮТСЯ в течение
   всей жизни ассоциации.
@@ -1532,6 +1536,9 @@ Reset Code 8, "Bad Service Code"
    подписок в MQTT), легко достижимое на практике значение.
 
 TBD 3.2.2.3.7 Assigned Client Identifier ?
+
+TODO not only client, but server ID also, thus node_id ? and lexicographical
+order of this determines low bit in message ID
 
 3.2.5. INIT_PARAM_SESSION
 
@@ -2304,6 +2311,9 @@ Add: 00 = NULL, 01 = 1 byte << 9, 10 = 2 bytes << 1, 11 = 2 bytes << 1 + 1
 version (schema?) field in CBAR, fields after which are extensions interpreted
 according to it
 
+PPID as first/only element in Presentation Layer sublist
+DUP is time_t only - always has lower uint32 as Add in CBAR?
+
   Итого, в 24 доступных байтах на минимальном MSS=24 в среднем случае:
 
     * 2 байта TSN Base
@@ -2793,6 +2803,22 @@ take record format from SQLite, somewhat modified
      |1|Incr Last Ptr|    path[last] += incr+1;
      +-+-+-+-+-+-+-+-+
 
+TBD if 32768 streams, then may be up to 4 VarInt15 children, and Pyramint5-like
+encoding which are atoms and which are integers to decoded CBAR list  - so don't
+need ResolvePath and relative paths, simplicity is plus
+
+      0               
+      0 1 2 3 4 5 6 7 
+     +-+-+-+-+-+-+-+-+
+     |Root |WhichAtom|
+     +-+-+-+-+-+-+-+-+
+
+            0 a a a a - path[4]
+            1 0 b b b - path[3]
+            1 1 0 c c - path[2]
+            1 1 1 0 d - path[1]
+            1 1 1 1 x - no path: root-only or special value
+TBD what to encode - is_atom or 8/16 bit where atoms negative? latter allows 65535 atoms
 
 
 TODO
@@ -3649,6 +3675,7 @@ TBD или в STREAM_CONTROL его?
 TBD для DUP можно в DATA выделить байт или VarInt16, от базового stamp
 но тогда гранулярность времени поменьше бы
 TBD а может, таки миллисекунды? и Delay 1-3 байта (0,10,11) до 22 бит?
+-> DUP is now in CBAR, ignore it here
 
 TBD case for Packet Counter + Delta from client - this is, in fact, TWO packet
 counters in header of such packet! one real, and one TSecr by Delta for
@@ -3684,6 +3711,12 @@ if granularity 2-3 bits (PacketCounter is not possible - very short)
 -> 4 byte format = 3 high bits of tv_sec + low 8 bits of Milliseconds (8.2 in hdr already)
 
 TBD just AND / shift - so performance? as Septinovile is usually for long ops anyway
+
+TBD use VarNibbles for non-full variants instead of bits complexitites
+
+TBD what about P on XS packets? on S size it possible just have another
+PacketCounter from server - reduced MSS in this direction, but XS may have no
+space left due to Nonce
 
 TBD
 
@@ -3741,7 +3774,7 @@ TODO в QUIC делают проверку на дропы с ECT(0) от пло
 в первый раз отправлять не ранее чем после 7 нормальных (не INIT) пакетов
 TBD изменить формат, раз на диоде формат нечетных дополнительного бита,
 и сменить LLLLL на Pyramint5
-
+-> no need if no P bit: just force XS to black mode?
 
       +-----+-----+
       | ECN FIELD |
@@ -4056,7 +4089,8 @@ TODO
 
 5. Internal streams.
 
-SipHash на 64 бит и HalfSipHash на 32 бит
+SipHash for 64 bit and HalfSipHash for 32 bit
+- and/or UMAC from OpenSSH
 
    Consider an example of censorship system disallowing any long-lived
    HTTPS connections
@@ -5181,6 +5215,8 @@ CRC32 (algo as in SCTP) is instead of MAC when Key=0, but only if:
 1) Packet is fragmented, or
 2) Packet is unfragmented and is > 128 bytes in length TBD better threshold?
 
+TBD MTU in first frag - also as Flags e.g. Public Key of K=1
+
 TODO
 
 
@@ -5211,7 +5247,7 @@ timestamp в формате struct timeval (big endian, 4 на секунды и
 
 Dif - биты, которые обязательно должны быть разными от клиента и сервера,
 для отличия от случайного попадания в обычный пинг
-
+TODO Dif is not needed in non-INIT packets as Tags are different
 
 Значения полей см. в описании UDP
 
@@ -5253,6 +5289,7 @@ Dif - биты, которые обязательно должны быть ра
   P - Packet Counter Odd (from server) / delta is for Odd (from client)
   S - Sign of Delta
   Server Time = Packet Stamp + Delta*(-1)^S, in both directions
+TODO PkCntWrap & Packet Counter from server, no Delta from client?
 
   INIT/ACK:
       0                   1                   2                   3
@@ -5424,6 +5461,9 @@ receiver at this packet do not know if packets with these ticks were lost or
 just sender was quiet; this resembles same problem which FSN solves
 -> have Pyramint5 for PkCntWrap: this PacketCounter_val was seen at least
    N time units ago
+   -> requires 5 more bits, this could be solved by 1 flag bit and putting it
+      into low bits of PacketCounter when they are zero, and require to always
+      reply by ECNE_CWR on such numbers 
 
 seems that ECNE_CWR in this form is not needed - we already have SACK, so it
 is for stats to cwnd adjust - whether was ECN, dups, etc.
@@ -5587,5 +5627,13 @@ TBD            RFC 7400           6LoWPAN-GHC
 to minimize head-of-line blocking, scheduling of streams should be
 proportional to cwnd
 
+TBD for XS pkt size when no MAC available, use scheme similar to  openssh's:
+        uint32  checkint
+        uint32  checkint
+  but two bytes, where two 6-bit random fields must be equal (1/64 collision
+  probability) and 4 bit is for checksum of first 20 bytes (TBD how many?)
+  which is 1/16 collision probability, giving 1/1024 total - more than that
+  of 1/256 of just two equal bytes
+  TBD or be it 2 nibbles and 1 byte of in_cksum()-like, so 1/4096 total? 
 
 TODO
