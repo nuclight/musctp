@@ -943,7 +943,7 @@ TBD нужна ли такая опция? будут ли бэкенды со �
             ERROR chunk using the 'Unrecognized Chunk Type' cause of
             error.
 
--- variant 20
+-- variant 19
 
 вообще всё переделать начисто, 3 или более разных number space: для
 user TSN chunks, internal streams TSN chunks и обычных опций - тех мб тоже
@@ -1017,12 +1017,93 @@ TBD перенести компрессию на уровень TSN - по по�
    -> это оставляет только 12 бит, и еще минус два значения (0xfb/0xfd)
    вариант: на длину внутреннего чанка их
    TBD Bitmap Ranges по номерам TSN ?
+   -> no, deflate outputs CRC-32 only at end of stream, not at block, so this
+   must be checksum
+     -> CRC-24 by RFC 4880
 
 ! we can't use I/U delta in length part - TSNs are independent from packet
 (cf. options), e.g. after retransmit on a path with different MTU
 
 TBD what if make compression a "packet" (it's NAK'ed all once, anyway), e.g.
 making a virtual "links" mapped to physical links (paths) ?
+
+-- variant 20
+
+say 0b10110 = 22
+
+       0   1   2   3   4   5   6   7
+     +---+---+---+---+---+---+---+---+...
+     |   Length, <= 23   |Opt. Delta | Option Data
+     +---+---+---+---+---+---+---+---+...
+
+short chunks (0xC0..CF):
+
+       0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15
+     +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
+     | 1   1   0   0 |   Chunk Length    |Chunk Type 0-13| B | E | S |
+     +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
+
+middle options (0xD0..DF):
+
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |1 1 0 1|Opt Delta|Option Length| Option Data
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+long options (0xE0..E7):
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |1 1 1 0 0|Option Delta |     Option Length     | Option Data
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+long chunks (0xE8..EF):
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |1 1 1 0 1|      Chunk Length     |ChuType|B|E|S|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+ending of both short and long chunks when Auth Key set (means B=1 E=0):
+
+       0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15
+  ...+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
+   Length| 1   1   1 |  Chunk Type   |      Auth Key ID          | S |
+  ...+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
+
+TODO as options 4096 now, compressed in option instead of separate parser type
+
+inside compressed container:
+
+       0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15
+     +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
+     |              Chunk Length             |UsrChunkTyp| B | E | S |
+     +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
+
+inside compressed container when Auth Key set (means B=1 E=0):
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |   Chunk Length    |1 1|UChType| Auth Key ID |S|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+TBD make it B flag when Auth Key ID, for intermediate key change before ending (instead of SSN records)?
+
+F0...F7 = Flags, or Internal Padding, if all-zero
+
+F8 - Option Delta += 128
+
+then as in variant 19
+
+TBD fragmentation problem - no need to AUTH every frag, but overall may has
+need, have packet sections?
+ -> see frag variant Packet 2.1
+
+TBD begin/end AUTH directly in format instead of separate option?
 
 -- /variant 20
 
@@ -1178,46 +1259,46 @@ Huffman - 0 for Class=Auth, 5 bits max / 1 byte? но там же 4
 
 TODO
 
-     Serial | Content | Meaning:
-     Type   | Size    | Value is...
-     =======+=========+===========================================
-        0   |    0    | a NULL
-        1   |    0    | empty (zero-length) string
-        2   |    1    | string with length 1
-        3   |    1    | a 8-bit atom, as 8-bit unsigned integer
-        4   |    0    | the integer 0 and boolean false
-        5   |    0    | the integer 1 and boolean true
-        6   |    0    | the integer 2
-        7   |    0    | Special Parser Type Modifier
-        8   |    1    | an 8-bit unsigned integer
-        9   |    1    | an 8-bit twos-complement integer
-     -------+---------+-------------------------------------------
-      10 a0 |    2    | a 16-bit atom, as big endian 16-bit unsigned integer
-      11 a1 |    0    | the integer -1, or 0xFF..FF if unsigned is meant
-      12 a2 |    2    | a string 2 bytes in length
-      13 a3 |    3    | a string 3 bytes in length
-      14 a4 |    4    | a string 4 bytes in length
-      15 a5 |    5    | a string 5 bytes in length
-      16 a6 |    6    | a string 6 bytes in length
-      17 a7 |    7    | a string 7 bytes in length
-      18 a8 |    2    | a big-endian 16-bit unsigned integer
-      19 a9 |    4    | a big-endian 32-bit unsigned integer
-      20 aa |    0    | Begin of sub-CBAR list
-      21 ab |    0    | End of sub-CBAR list
-      22 ac |    2    | a big-endian 16-bit twos-complement integer
-      23 ad |    3    | a big-endian 24-bit twos-complement integer
-      24 ae |    4    | a big-endian 32-bit twos-complement integer
-      25 af |    2    | a big-endian IEEE 754 Half-Precision Float (16-bit)
-     -------+---------+-------------------------------------------
-     26 b00 |    4    | a big-endian IEEE 754 Single-Precision Float (32-bit)
-     27 b01 |    8    | a big-endian IEEE 754 Double-Precision Float (64-bit)
-     28 b02 |    8    | a big-endian 64-bit unsigned integer
-     29 b03 |    8    | a big-endian 64-bit twos-complement integer
-     30 b04 |    ?    | Reserved
-     31 b05 |    5    | a big-endian 40-bit twos-complement integer
-     32 b06 |    6    | a big-endian 48-bit twos-complement integer
-     33 b07 |    7    | a big-endian 56-bit twos-complement integer
-      N>=34 |   N-26  | a string with length N-26 (8 bytes or more)
+       Serial  Content | Meaning:
+     Code | N  | Size  | Value is...
+     =====+====+========+===========================================
+       0  | 0  |   0   | a NULL
+       1  | 1  |   0   | empty (zero-length) string
+       2  | 2  |   1   | string with length 1
+       3  | 3  |   1   | a 8-bit atom, as 8-bit unsigned integer
+       4  | 4  |   0   | the integer 0 and boolean false
+       5  | 5  |   0   | the integer 1 and boolean true
+       6  | 6  |   0   | the integer 2
+       7  | 7  |   0   | Special Parser Type Modifier
+       8  | 8  |   1   | an 8-bit unsigned integer
+       9  | 9  |   1   | an 8-bit twos-complement integer
+     -----+----+-------+-------------------------------------------
+       a0 | 10 |   2   | a 16-bit atom, as big endian 16-bit unsigned integer
+       a1 | 11 |   0   | the integer -1, or 0xFF..FF if unsigned is meant
+       a2 | 12 |   2   | a string 2 bytes in length
+       a3 | 13 |   3   | a string 3 bytes in length
+       a4 | 14 |   4   | a string 4 bytes in length
+       a5 | 15 |   5   | a string 5 bytes in length
+       a6 | 16 |   6   | a string 6 bytes in length
+       a7 | 17 |   7   | a string 7 bytes in length
+       a8 | 18 |   2   | a big-endian 16-bit unsigned integer
+       a9 | 19 |   4   | a big-endian 32-bit unsigned integer
+       aa | 20 |   0   | Begin of sub-CBAR list
+       ab | 21 |   0   | End of sub-CBAR list
+       ac | 22 |   2   | a big-endian 16-bit twos-complement integer
+       ad | 23 |   3   | a big-endian 24-bit twos-complement integer
+       ae | 24 |   4   | a big-endian 32-bit twos-complement integer
+       af | 25 |   2   | a big-endian IEEE 754 Half-Precision Float (16-bit)
+     -----+----+-------+-------------------------------------------
+      b00 | 26 |   4   | a big-endian IEEE 754 Single-Precision Float (32-bit)
+      b01 | 27 |   8   | a big-endian IEEE 754 Double-Precision Float (64-bit)
+      b02 | 28 |   8   | a big-endian 64-bit unsigned integer
+      b03 | 29 |   8   | a big-endian 64-bit twos-complement integer
+      b04 | 30 |   ?   | Reserved
+      b05 | 31 |   5   | a big-endian 40-bit twos-complement integer
+      b06 | 32 |   6   | a big-endian 48-bit twos-complement integer
+      b07 | 33 |   7   | a big-endian 56-bit twos-complement integer
+        N>=34  |  N-26 | a string with length N-26 (8 bytes or more)
 
    strings with lengths 8..255 will look from 0xb08 to 0xbff, so length is
    observable in low byte, and for strings with lengths 1..7 length is
@@ -1669,6 +1750,93 @@ TBD заменить Res/FracS на максимальную гранулярн�
    дельта знаковая, и -63..+64 секунды дают половину интервала, больше
    которого уже может возникнуть двусмысленность.
 
+-- variant unfragmented
+
+  Format of INIT from client:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |Ver|0|                      Initiate Tag                       |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |mIS|OS |mCh|IRW|SExpiry|SLength| Flags and Lengths, VarUInt32  |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.....+
+     |   Time since Epoch, Seconds, 4 bytes, present if T flag set   |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /           Service Name or Session ID (1..16 bytes)            /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /  Extended Parameters as CBAR, present if length in flags > 0  /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /     Padding (ignored), if underlying protocol requires so     /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+  Format of INIT_ACK from server:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |IRW|0|                      Initiate Tag                       |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |mIS|OS |mCh|ServInstNum|CookieL| Flags and Lengths, VarUInt32  |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.....+
+     |   Time since Epoch, Seconds, 4 bytes, present if T flag set   |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /                   State Cookie (8..23 bytes)                  /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /  Extended Parameters as CBAR, present if length in flags > 0  /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /     Padding (ignored), if underlying protocol requires so     /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+  The flags from client:
+  (note bits numbering from right)
+
+        2              |  2 1          |      1        |
+        9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |    Reserved         |  CBAR Extensions Length   |C|Too|S|T|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+    * C, 1 bit - Clean Start as in MQTT
+    * Too - how many seconds "too much" is, as 2^(Too+3), that is, 3 means 64 sec
+
+  The flags from server:
+  (note bits numbering from right)
+
+        2              |  2 1          |      1        |
+        9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |    Reserved         |  CBAR Extensions Length   |A|QoS|S|T|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+
+  Common flags:
+
+   T - 4 bytes of Full Timestamp are present
+   S - Synchronize:
+     * from client: "I will use your time if it differs too much"
+     * from server: "I have NTP synchronized clock"
+
+TBD no CBAR length, but just usual option format, and CBAR inside INIT option?
+
+TBD data in INIT pkt / cookie like RFC 7413 TCP Fast Open - but based on time?
+
+TBD proxy - e.g. for inspecting by firewalls, service request?
+
+-- /variant unfragmented
+
 3.3. Процедуры.
 
   В конечном итоге, после получения Cookie в INIT_ACK, клиент отправляет пакет
@@ -1845,7 +2013,7 @@ int_rwnd always Pyramint6
        |0 0| int_rwnd  | SACK range #1 |
      8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
 
-       |0 1| int_rwnd  |arwnd Pyramint8| SACK range #1 | SACK range #2 |
+       |1 0| int_rwnd  |arwnd Pyramint8| SACK range #1 | SACK range #2 |
      8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
        |0 1| int_rwnd  |Shift|   a_rwnd's mantissa     | SACK range #1 |
@@ -1854,6 +2022,9 @@ int_rwnd always Pyramint6
 - so 1 Mbyte max
 
 
+        0                   1                   2                   3
+        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
        |1 1| int_rwnd  | Shift |a_rwnd's mantissa with implicit right 1|
      8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
@@ -1871,7 +2042,7 @@ TBD или нет, лучше на channels из SSH - отдельное про
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|L|B|E|Strm ID| Stream Sequence Number|OpCode |Len/Err|
+     |TSN Layer|L|B|E|Strm ID| Stream Sequence Number|OpCode |Len/Err|
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-.
      |Len ext.(opt.) |  Initial Window or Window Adjustment (opt.)   |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-.
@@ -1956,7 +2127,7 @@ window space and may be sent even if no window space is available.
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|L|B|E| Cmd |Stream ID|    Stream Sequence Number     |
+     |TSN Layer|L|B|E| Cmd |Stream ID|    Stream Sequence Number     |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-.
      |LenHi|A|PPI|IWH|  Initial Window or Window Adjustment (opt.)   |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-.
@@ -1974,7 +2145,7 @@ window space and may be sent even if no window space is available.
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|L|B|E|   Stream ID   |    Stream Sequence Number     |
+     |TSN Layer|L|B|E|   Stream ID   |    Stream Sequence Number     |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-.
      |   | Cmd |LenHi|Length, if E=0 |                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               /
@@ -2029,7 +2200,7 @@ TBD сколько бит на SSN ? похоже, при окне 32 и пак�
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|1|E|L| Cmd |         Stream Sequence Number          |
+     |TSN Layer|1|E|L| Cmd |         Stream Sequence Number          |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |  Stream ID    |Length, if E=0 |                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               /
@@ -2042,7 +2213,7 @@ TBD сколько бит на SSN ? похоже, при окне 32 и пак�
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|0|E|  FSN  |         Stream Sequence Number          |
+     |TSN Layer|0|E|  FSN  |         Stream Sequence Number          |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |  Stream ID    |                                               \
      +-+-+-+-+-+-+-+-+                                               /
@@ -2059,7 +2230,7 @@ CHANNEL_DATA:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|1|E|1|LenHi|         Stream Sequence Number          |
+     |TSN Layer|1|E|1|LenHi|         Stream Sequence Number          |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |  Stream ID    |LenLow, if E=0 |                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               /
@@ -2073,7 +2244,7 @@ all other commands
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|1|E|0| Cmd |         Stream Sequence Number          |
+     |TSN Layer|1|E|0| Cmd |         Stream Sequence Number          |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |  Stream ID    |   Length, VarInt15, if E=0    |               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+               /
@@ -2094,23 +2265,35 @@ TBD
 
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...+-+-+-+-+-+-+-+-+-+-+-+-+...
-     |TSN Delta|B|E|L|Opcode/FSN |SSN|Block Length 0/1/2 байт| данные
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...+-+-+-+-+-+-+-+-+-+-+-+-+...
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |TSN Layer|B|E|L| Length, opt.  |Opcode/FSN/SSN | Data...
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
 
-  Здесь бит L задаёт длину поля Block Length, если оно в наличии:
-  1 байт, если бит равен 0, 2 байта, если бит выставлен 1. Таким образом,
-  поддерживается максимальный размер криптографического сообщения до 65535
-  байт, что достаточно, например, для Noise Protocol Framework.
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |TSN Layer|1|0|L| Length, L+1 b |SSN|  Opcode   | Data...
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
 
-  Поскольку номер опции для криптографии меньше номера для данных, то
-  криптография в пакете всегда будет "вытеснять" пользовательские данные,
-  идя первой - что и требуется для безопасности.
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |TSN Layer|0|E|  Offset TSN |SSN| Data...
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+  Bit L is for length of Length field, if it is present: 1 byte if L is 0,
+  or 2 bytes otherwise. Length itself is after SSN/Opcode byte (that is, 0
+  if only SSN/Opcode present), thus maximum cryptographic message size is 65535
+  bytes, which is enough, for example, for Noise Protocol Framework.
 
   As there is just 2 bits for Sequence Number, only one message allowed to
   be in flight, that is, crypto stream is operated in stop-and-wait mode.
 
-  Сами криптографические сообщения описаны в разделе 5.
+TBD or more? SSH2_MSG_NEWKEYS in both directions and it's timestamp as Key ID
+for subsequent assignment to per-address Shared Key ID in sesctl? or just
+increment common key id in each negotiation? next_slot?
+
+  Messages on CRYPTO stream are described in Section 5.2.
 
 4.4. DATA: User Payload Data.
 
@@ -2119,7 +2302,7 @@ TBD
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|U|B|E|Strm ID| Stream Sequence Number|BLL|Blk Len/Ofs|
+     |TSN Layer|U|B|E|Strm ID| Stream Sequence Number|BLL|Blk Len/Ofs|
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      ... 0, 1, 2 или 3 байта продолжения Block length / Offset       |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-..............+
@@ -2214,7 +2397,7 @@ TBD после FORWARD_TSN должен происходить сброс prev
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|B|E|U|    Stream Sequence Number     |Stream ID, 9 bi|
+     |TSN Layer|B|E|U|    Stream Sequence Number     |Stream ID, 9 bi|
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |t|  FSN, 6, 13 or 21 bits Huf: 0, 10, 11       | User Data...
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -2226,7 +2409,7 @@ ordered:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|1|E|0|    Stream Sequence Number     |Stream ID, 9 bi|
+     |TSN Layer|1|E|0|    Stream Sequence Number     |Stream ID, 9 bi|
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |t|X|QoS/D|F|PPL| | Opt. X byte |T| TTL (Pfloat7) / Dup 1/2 byte|
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -2242,7 +2425,7 @@ unordered unfragged:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|1|1|1|    Stream Sequence Number     |Stream ID, 9 bi|
+     |TSN Layer|1|1|1|    Stream Sequence Number     |Stream ID, 9 bi|
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |t|X|H|T|F|PPL|R| Opt. X byte |T| TTL (Pfloat7) | Content-Format .
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -2254,7 +2437,7 @@ unordered first:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|1|0|1|    Stream Sequence Number     |Stream ID, 9 bi|
+     |TSN Layer|1|0|1|    Stream Sequence Number     |Stream ID, 9 bi|
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |t|X|H|T|F|PPL|L|  Opt. X byte  |T|TTL (Pfloat7)| Content-Format.
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -2307,6 +2490,8 @@ TODO смещение в DUP для докачки, использовать д�
    ...тогда как QoS в лонг формате?
 
 Add: 00 = NULL, 01 = 1 byte << 9, 10 = 2 bytes << 1, 11 = 2 bytes << 1 + 1
+-> no, 2 bits ASh - shift 0/4/8/12 bits, and Add as VarUInt32
+  TBD in CBAR also ASh os low 2 bits?
 
 version (schema?) field in CBAR, fields after which are extensions interpreted
 according to it
@@ -2381,7 +2566,7 @@ TBD а что с разрывами? атомы тоже QoS'ить надо?..
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|0|1|E| SeqNum  | Msg |L|Length if E=0| Len ext. if L |
+     |TSN Layer|1|E|0| SeqNum  | Msg |L|Length if E=0| Len ext. if L |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      | Data...
      +-+-+-+...
@@ -2389,7 +2574,7 @@ TBD а что с разрывами? атомы тоже QoS'ить надо?..
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|1|1|E| SeqNum  | Reply/Err |RepSeqNum|L|Length if E=0|
+     |TSN Layer|1|E|1| SeqNum  | Reply/Err |RepSeqNum|L|Length if E=0|
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      | Len ext. if L | Data ...
      +-+-+-+-+-+-+-+-+-+-+-+...
@@ -2397,7 +2582,7 @@ TBD а что с разрывами? атомы тоже QoS'ить надо?..
       0                   1
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
-     |TSN Delta|S|0|E|  SeqNum | FSN |  Data...
+     |TSN Layer|0|E|S|  SeqNum | FSN |  Data...
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
 
 TODO если вводить FSN и поднять (здесь) SeqNum до 6 бит (здесь старший FSN в
@@ -2585,49 +2770,6 @@ algorithm.HMAC.HalfSipHash.0.1: 4
 algorithm.HMAC.HalfSipHash.0.length(2): 4
 algorithm.compress.deflate: true
 
-# path integer only
-cat_or_cd-and-ls /abs/path
-cat_or_cd-and-ls one-elem-relpath
-cd ..
-
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+-+-+
-     |0|L|Septinovile| Path...
-     +-+-+-+-+-+-+-+-+-+-+
-
-      0               
-      0 1 2 3 4 5 6 7     00 - Deleted
-     +-+-+-+-+-+-+-+-+    01 - cd to Node, L=0
-     |1|N/D|IndexIncr|    10 - cd to Node, L=1
-     +-+-+-+-+-+-+-+-+
-
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+
-     |1 1 1|         |
-     +-+-+-+-+-+-+-+-+
-
-uint32_t 1 byte		0
-uint32_t 2 byte		1
-uint32_t 3 byte		2
-uint32_t 4 byte		3
-uint64_t 3 byte		4
-uint64_t 4 byte		5
-uint64_t 5 byte		6
-uint64_t 6 byte		7
-uint64_t 7 byte		8
-uint64_t 8 byte		9
-int32_t 1 byte		10
-int32_t 2 byte		11
-int32_t 3 byte		12
-int32_t 4 byte		13
-int64_t 3 byte		14
-int64_t 4 byte		15
-int64_t 5 byte		16
-int64_t 6 byte		17
-int64_t 7 byte		18
-int64_t 8 byte		19
 
 SIMPLE_FALSE		20
 SIMPLE_TRUE		21
@@ -2869,7 +3011,7 @@ variant: не финальные номера и битмапы, а 1-4 байт
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |1 1 0|   TSN Delta   |U|Stream Sequence Number |   Stream ID   |
+     |1 1 0|   TSN Layer   |U|Stream Sequence Number |   Stream ID   |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
       0                   1                   2      
@@ -3180,6 +3322,8 @@ no need for "RTT spin bit" of QUIC - LINK_INFO could be just put under Shared Ke
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      | MSS C2S (opt) | MSS S2C (opt) |
      +-...-+-+-+-+-+-+-...-+-+-+-+-+-+
+
+CCVal not needed? RFC 3448
 
     * RTTsh - сдвиг SRTT
     * H - in Half seconds ?? TBD
@@ -4077,12 +4221,72 @@ TODO PkCntWrap
 
 -- /variant Packet
 
+-- variant Packet 2
+
+as in Packet, but first TSN of packet is used as Fragment ID, length is
+limited to 16 Kb, and VarNibbles for header:
+
+     0                   1                   2                   3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |    Transmission Sequence Number, serving as a fragment ID     |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |FLA|Packet Length/Offset/C. ACK| Data...
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+   Middle and last fragments:
+
+     0                   1                   2                   3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |    Transmission Sequence Number, serving as a fragment ID     |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |FLA|         Offset            | Data...
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+   First fragment contains packet header:
+
+     0                   1                   2                   3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |    Transmission Sequence Number, serving as a fragment ID     |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    | 0 |      Packet Length        | Packet Header, in VarNibbles, |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...+-+-+-+-+-+-+-+-+-+-+
+    |  see description...           | Packet body data
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+   Packet Header data in VarNibbles array:
+
+     Client Address No,
+     Server Address No,
+     tv_sec delta from start of connection, //TBD
+     tv_usec << 2 + TSL,
+     Packet Counter.
+
+-- variant Packet 2.1: not packet, just TSN container, so AUTH key and hash (if has BE), no TSL/addrs/counter
+
+   And ACK has TSN of opposite direction:
+
+     0                   1                   2                   3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |      Transmission Sequence Number of your side fragments      |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |1 1| Cumulative Offset ACK     | SACK as Bitmap ranges
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+TBD what to do if same TSN was retransmitted on two or more different paths,
+which packet to select for fragmentation?
+
+-- /variant Packet 2
+
 4. NAK
 
 for stream where window is less than chunk size but relatively big there is
 ambiguity - so implementation MAY send NAK but also MAY accept it, for case
 sender is opportunistically sent chunk in hope window will increase while
-in flight (TBD also SWS)
+in flight TBD also SWS (silly-window syndrome)
 
 4.
 TODO
@@ -4570,6 +4774,15 @@ see also RFC 3517 which has more proper definition than SCTP spec of e.g.
 what is flightsize, "pipe" in TCP's terminology (when byte counted twice),
 also RFC 2581
 and RFC 7323 for updated TCP timestamps/RTO
+
+RFC 4341 (DCCP CCID2):
+   Section 12.2.  Information about marked packets is also returned in
+   the Ack Vector.  Because the information in the Ack Vector is
+   reliably transferred, DCCP does not need the TCP flags of ECN-Echo
+   and Congestion Window Reduced.
+
+ACK Ratio changing as handling congestion on return path
+
 
 8. Обработка сбоев.
 
@@ -5217,6 +5430,10 @@ CRC32 (algo as in SCTP) is instead of MAC when Key=0, but only if:
 
 TBD MTU in first frag - also as Flags e.g. Public Key of K=1
 
+TBD if variant INIT unfragged - move MTU to first byte of Fragment Cookie, which
+is CoAP (?) reply code if Frags=15/error
+
+
 TODO
 
 
@@ -5635,5 +5852,11 @@ TBD for XS pkt size when no MAC available, use scheme similar to  openssh's:
   which is 1/16 collision probability, giving 1/1024 total - more than that
   of 1/256 of just two equal bytes
   TBD or be it 2 nibbles and 1 byte of in_cksum()-like, so 1/4096 total? 
+
+TBD there is problem with child stream ordering for e.g. stderr on SSH ?
+e.g. if we put SSH_MSG_CHANNEL_EXTENDED_DATA into child stream and packet
+loss occurs, user will see stdout & stderr in different order
+TBD but is it critical ?
+
 
 TODO

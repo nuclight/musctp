@@ -60,7 +60,7 @@ It was discovered that operating on constrained MTU links such as 6LoWPAN and ce
 
 Every such step in this cat-and-mouse game is a pain. Ways of tunneling generic protocols (TCP) on constrained links are often ineffective, especially if the application above does know nothing about it. Specialized application protocols could be much better, but then at each step of this war is a boring task of reimplementing e.g. retransmits, `cwnd` etc. in _slightly different_ way. Abstracting such things and keeping underlying modules as simple as possible may be a way to react more fast.
 
-The opposite use case is also true - this may be used in "peaceful" Internet, too. Consider an example below of 33-byte 6LoWPAN and 90-byte direct 802.15.4 frame on the same node - given a slow speed of adoption of different ways of header compression (e.g. the time between RFC 4919, RFC 6282 and RFC 7400), muSCTP could offer a faster IoT development at least in experimenation area.
+The opposite use case is also true - this may be used in "peaceful" Internet, too. Consider an example below of 33-byte 6LoWPAN and 90-byte direct 802.15.4 frame on the same node - given a slow speed of adoption of different ways of header compression (e.g. the time between RFC 4919, RFC 6282 and RFC 7400), muSCTP could offer a faster IoT development at least in experimentation area.
 
 ## Next step in evolution of transport protocols
 
