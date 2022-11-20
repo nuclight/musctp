@@ -1768,7 +1768,7 @@ TBD заменить Res/FracS на максимальную гранулярн�
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
-     /  Extended Parameters as CBAR, present if length in flags > 0  /
+     /   Options in usual format, for CBAR parameters & user data    /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
@@ -1785,14 +1785,14 @@ TBD заменить Res/FracS на максимальную гранулярн�
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |mIS|OS |mCh|ServInstNum|CookieL| Flags and Lengths, VarUInt32  |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+.....+
-     |   Time since Epoch, Seconds, 4 bytes, present if T flag set   |
+     |    Time since Epoch, Seconds, 0/1/2/4 bytes, by TEL field     |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
      /                   State Cookie (8..23 bytes)                  /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
-     /  Extended Parameters as CBAR, present if length in flags > 0  /
+     /   Options in usual format, for CBAR parameters & user data    /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
@@ -1806,7 +1806,7 @@ TBD заменить Res/FracS на максимальную гранулярн�
         2              |  2 1          |      1        |
         9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |    Reserved         |  CBAR Extensions Length   |C|Too|S|T|
+       |                   Reserved                    |C|Too|S|TEL|
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
     * C, 1 bit - Clean Start as in MQTT
@@ -1818,20 +1818,27 @@ TBD заменить Res/FracS на максимальную гранулярн�
         2              |  2 1          |      1        |
         9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |    Reserved         |  CBAR Extensions Length   |A|QoS|S|T|
+       |                   Reserved                    |A|QoS|S|TEL|
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
+  A - Authentication required
 
   Common flags:
 
-   T - 4 bytes of Full Timestamp are present
+   TEL - Time since Epoch Length, how many bytes of Full Timestamp are present:
+     00 - none (timestamp field absent)
+     01 - 1 high byte
+     10 - 2 high bytes
+     11 - full 4 bytes
    S - Synchronize:
      * from client: "I will use your time if it differs too much"
      * from server: "I have NTP synchronized clock"
 
-TBD no CBAR length, but just usual option format, and CBAR inside INIT option?
-
 TBD data in INIT pkt / cookie like RFC 7413 TCP Fast Open - but based on time?
+TBD no CBAR length, but just usual option format, and CBAR inside INIT option?
+-> no, inside TSN chunk so retransmit is natural
+  TBD hash of it in State Cookie?
+  TBD flag from server about "INIT opts/chunks are not ignored (no need to retransmit)"?
 
 TBD proxy - e.g. for inspecting by firewalls, service request?
 
@@ -2917,7 +2924,6 @@ TBD команда ResolvePath: нулевой байт как у обычног
 take record format from SQLite, somewhat modified
 
 
-
    short path[8];
    int last;
 
@@ -2945,6 +2951,8 @@ take record format from SQLite, somewhat modified
      |1|Incr Last Ptr|    path[last] += incr+1;
      +-+-+-+-+-+-+-+-+
 
+-- variant SQL 2:
+
 TBD if 32768 streams, then may be up to 4 VarInt15 children, and Pyramint5-like
 encoding which are atoms and which are integers to decoded CBAR list  - so don't
 need ResolvePath and relative paths, simplicity is plus
@@ -2961,7 +2969,20 @@ need ResolvePath and relative paths, simplicity is plus
             1 1 1 0 d - path[1]
             1 1 1 1 x - no path: root-only or special value
 TBD what to encode - is_atom or 8/16 bit where atoms negative? latter allows 65535 atoms
+-> length allows to put length field in front so to shorten header
+  -> invert 0/1 so length could be just count of set bits?
 
+TBD for sublists with tree of streams, even 64 Kb is not enough - use
+Septinovile as 7 or 9 to be multiplier of usual length field?
+-> possible variant: VarUInt32 with Hi 19 bits for length, 5 for root and 6 by
+   scheme above (means 5 levels max after root)
+-> or still 5 bits for 4 levels, so one bit of root can encode Atom length
+   in single byte (6 bits)
+ TBD make length aligned to 4 bit? 18 len / 7 roots - this is too many roots...
+   -> 22 len, 3 root, 5 as above (4 levels) = 8 roots and 4 Mb
+      ...but this is almost the same as byte in variant SQL 2, always having
+      length <=63 in 2 bytes
+      -> put Root in LSB, invert 0/1 - then only long paths will have 2 bytes
 
 TODO
 
@@ -5399,7 +5420,7 @@ INIT/ACK-пакет:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |Ver|1|K|TSL| tv_sec High 26 bits with Low 8 as Packet Counter  |
+     |Ver|1|K|TSL| tv_sec low 26 bits with Low 8 as Packet Counter   |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |T23|MTU| Frags |    Fragment Cookie, if fragged, 0 if error    |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
