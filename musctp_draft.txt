@@ -365,7 +365,7 @@ TODO
         uint8_t         sa_family;      /* address family */
         char            sa_data[126];   /* to sockaddr_storage max size */
     };
-
+RFC 3493
   То есть, 1 байт полной длины (включая саму длину), 1 байт типа адреса, и
   собственно данные адреса, зависящие от его типа. В отличие от низкоуровневой
   struct sockaddr, в muSCTP в основном применяются более высокоуровневые типы.
@@ -1218,6 +1218,9 @@ TBD вариант Хаффмана 1-байтным:
    11111110 - 16 G
    11111111 - 32 G
 
+TBD Pyramint9 for 2^45 perfectly matches max of 2^31 TSN * 16 Kb packet, has
+it enough granularity on low values to avoid SWS ?
+
 TBD и что-то не сходится
 
 2.6. Atoms & CBAR - Compact Binary Array/Record
@@ -1261,20 +1264,20 @@ TODO
 
        Serial  Content | Meaning:
      Code | N  | Size  | Value is...
-     =====+====+========+===========================================
+     =====+====+========+=====================================================
        0  | 0  |   0   | a NULL
        1  | 1  |   0   | empty (zero-length) string
        2  | 2  |   1   | string with length 1
-       3  | 3  |   1   | a 8-bit atom, as 8-bit unsigned integer
+       3  | 3  |   0   | the integer -1, or 0xFF..FF if unsigned is meant
        4  | 4  |   0   | the integer 0 and boolean false
        5  | 5  |   0   | the integer 1 and boolean true
        6  | 6  |   0   | the integer 2
-       7  | 7  |   0   | Special Parser Type Modifier
+       7  | 7  |   0   | Sublist / Tag: Special Parser Type Modifier
        8  | 8  |   1   | an 8-bit unsigned integer
        9  | 9  |   1   | an 8-bit twos-complement integer
-     -----+----+-------+-------------------------------------------
-       a0 | 10 |   2   | a 16-bit atom, as big endian 16-bit unsigned integer
-       a1 | 11 |   0   | the integer -1, or 0xFF..FF if unsigned is meant
+     -----+----+-------+------------------------------------------------------
+       a0 | 10 |   1   | a 8-bit atom, as 8-bit unsigned integer
+       a1 | 11 |   2   | a 16-bit atom, as big endian 16-bit unsigned integer
        a2 | 12 |   2   | a string 2 bytes in length
        a3 | 13 |   3   | a string 3 bytes in length
        a4 | 14 |   4   | a string 4 bytes in length
@@ -1283,18 +1286,18 @@ TODO
        a7 | 17 |   7   | a string 7 bytes in length
        a8 | 18 |   2   | a big-endian 16-bit unsigned integer
        a9 | 19 |   4   | a big-endian 32-bit unsigned integer
-       aa | 20 |   0   | Begin of sub-CBAR list
-       ab | 21 |   0   | End of sub-CBAR list
+       aa | 20 |   ?   | Reserved
+       ab | 21 |   ?   | Reserved
        ac | 22 |   2   | a big-endian 16-bit twos-complement integer
        ad | 23 |   3   | a big-endian 24-bit twos-complement integer
        ae | 24 |   4   | a big-endian 32-bit twos-complement integer
        af | 25 |   2   | a big-endian IEEE 754 Half-Precision Float (16-bit)
-     -----+----+-------+-------------------------------------------
+     -----+----+-------+------------------------------------------------------
       b00 | 26 |   4   | a big-endian IEEE 754 Single-Precision Float (32-bit)
       b01 | 27 |   8   | a big-endian IEEE 754 Double-Precision Float (64-bit)
       b02 | 28 |   8   | a big-endian 64-bit unsigned integer
       b03 | 29 |   8   | a big-endian 64-bit twos-complement integer
-      b04 | 30 |   ?   | Reserved
+      b04 | 30 |   0   | lrepeat: next code+4 is repeat count for next type code
       b05 | 31 |   5   | a big-endian 40-bit twos-complement integer
       b06 | 32 |   6   | a big-endian 48-bit twos-complement integer
       b07 | 33 |   7   | a big-endian 56-bit twos-complement integer
@@ -1841,6 +1844,7 @@ TBD no CBAR length, but just usual option format, and CBAR inside INIT option?
   TBD flag from server about "INIT opts/chunks are not ignored (no need to retransmit)"?
 
 TBD proxy - e.g. for inspecting by firewalls, service request?
+  TBD how to ATOM_CONFIG and timestamps via inspecting proxy?
 
 -- /variant unfragmented
 
@@ -2499,6 +2503,7 @@ TODO смещение в DUP для докачки, использовать д�
 Add: 00 = NULL, 01 = 1 byte << 9, 10 = 2 bytes << 1, 11 = 2 bytes << 1 + 1
 -> no, 2 bits ASh - shift 0/4/8/12 bits, and Add as VarUInt32
   TBD in CBAR also ASh os low 2 bits?
+  TBD for proxy will need DUP flag separate from timestamp, so S - Shift present in low 5 bits?
 
 version (schema?) field in CBAR, fields after which are extensions interpreted
 according to it
@@ -3044,7 +3049,7 @@ variant: не финальные номера и битмапы, а 1-4 байт
       0                   1           
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+  I = Increment SSN by 1
-     |1 0|I|Look Behind|  TSN Delta  |
+     |1 0|I|Look Behind|  TSN Layer  |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 -- SQL variant
@@ -3057,6 +3062,11 @@ SID = is_SID_delta ? delta : absoulte SID
 or,
 SID+SSN = 20 bit, then take VarNibbles on this sorted list
 TBD 5 nibbles = 20 bit, need 1 bit for U and maybe 1 bit for SKIP vs ABANDON
+
+-- SQL variant 32
+
+sorted list of 31-bit numbers SID|SSN
+first 4 bytes = U+SID+SSN of first gap, then deltas as VarNibbles
 
 -- /SQL variant
 
@@ -4422,6 +4432,7 @@ TODO supported variants:
 * direct request of new key from server (when over already encrypted)
 * EAP support
 * KEX from SSH
+  - 0..239 for 0..79 in 3 variants: direct, proxy, double proxy
 * public key for Key 1, that is, for INIT, in addition to pre-shared symmetric
 
 5.2.1. CRYPTO_DIRECT_KEY and CRYPTO_DIRECT_KEY_REPLY.
@@ -5528,6 +5539,7 @@ TODO Dif is not needed in non-INIT packets as Tags are different
   S - Sign of Delta
   Server Time = Packet Stamp + Delta*(-1)^S, in both directions
 TODO PkCntWrap & Packet Counter from server, no Delta from client?
+PkCntWrap is not needed in black mode
 
   INIT/ACK:
       0                   1                   2                   3
@@ -5854,6 +5866,7 @@ in unordered messages) is overkill to implement here - just tunnel backend is en
   not know real server address
 - such proxy could be implemented on small devices with no storage, e.g.
   OpenWRT
+this to be called opaque proxy, in contrast to inspecting proxy
 
 TODO sockaddr aliases - fot both NAT and NewIP segments TBD extension in tree
 
@@ -5864,6 +5877,8 @@ TBD            RFC 7400           6LoWPAN-GHC
 
 to minimize head-of-line blocking, scheduling of streams should be
 proportional to cwnd
+same applies to Pertial Reliability: "throwable" should not be bundled in one
+TSN (packet) with really reliable chunks
 
 TBD for XS pkt size when no MAC available, use scheme similar to  openssh's:
         uint32  checkint

@@ -105,9 +105,9 @@ Portions are taken from usrsctp implementation, subject to their copyrights.
 The rest of this implementation is available at triple+ license:
 
 1. One of listed open-source licenses, provided that using project's source size is more than twice as this (muSCTP) implementation's source size:
-  - BSD for projects under BSD license (e.g. BSD-family operating systems kernels).
-  - Perl Artistic License for Perl itself and projects written in Perl, or projects under Artistic license
-  - Tcl/Tk License for Tcl (and projects written in Tcl)
+    - BSD for projects under BSD license (e.g. BSD-family operating systems kernels).
+    - Perl Artistic License for Perl itself and projects written in Perl, or projects under Artistic license
+    - Tcl/Tk License for Tcl (and projects written in Tcl)
 2. CDDL for all others.
 3. Or you could buy commercial license if neither of these is appropriate for you.
 
