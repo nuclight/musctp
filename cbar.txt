@@ -1,0 +1,256 @@
+   !!! early draft!
+
+      CBAR: CBOR and generic BLOBs by-Atom Reducing
+      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1.
+
+
+1.1. Terminology
+
+   Nibble - half of byte, 4 bits, one hexadecimal digit.
+
+
+
+2. VarNibble.
+
+   This is a variable-length integer encoding on the sub-byte resolution. It
+   occupies integral number of nibbles and utilizes addition scheme in
+   a manner similar to CoAP [RFC 7252] option delta encoding: the lowest
+   possible values are encoded as themselves, and at each increasing of length
+   value zero of expanded bitfield is total 
+
+   Enconding                                               Total values / zero
+                                                           of next level's
+      0                                                    Biased Value
+      0 1 2 3
+     +-+-+-+-+
+     | 0..9  | Integers from 0 to 9, themselves
+     +-+-+-+-+
+
+      0               
+      0 1 2 3 4 5 6 7 
+     +-+-+-+-+-+-+-+-+
+     |  0xa  |B.Val. | Integer Values from 10 to 25            10 + 16 = 26
+     +-+-+-+-+-+-+-+-+
+
+      0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+
+     |  0xb  | Biased Value  | Integer Values from 26 to 281   26 + 256 = 282
+     +-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |  0xc  | Biased Value, 12 bits | ...and so on            282 + 4096
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1                   
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |  0xd  |     Biased Value, 16 bits     |                 4378 + 65536
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |  0xe  |         Biased Value, 20 bits         |         69914 + 1048576
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |  0xf  |             Biased Value, 24 bits             | 1118490 + 2^24
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   For example, integer value 17 is encoded as two nibbles 0xa7, and value 42
+   is encoded as three nibbles 0xb14.
+
+
+2.1. VarNibbles.
+
+   This is array, occupying integral number of bytes, each individual element
+   is a VarNible. How possible 4-bit padding is treated by upper layer, e.g.
+   in a sequence of delta-encoding last nibble could just 0 (indicating no
+   difference from previous value), and other schemes could employ explicit
+   count of nibbles, so possible last nibble could be ignored if total number
+   is odd.
+
+3. The CBAR encoding.
+
+   CBAR-based protocol defines two dictionaries: one is byte string, virtually
+   prepended to output buffer for backreferences (but which is not part of
+   output itself), and other dictionary is a set of atoms. In degenerate case
+   both dictionaries are empty so that compression is possible only by RLE
+   (run-length encoding) and backreferences in the compressed data itself.
+
+   An atom is a byte string (3 bytes or more) which, with it's length, is
+   known both to compressor and decompressor under some number. So, when
+   decompressor sees instruction "use atom 42", it looks up 42-th entry in
+   atom dictionary and substitutes this bytestring to output instead of atom
+   number. Atoms are numbered from 0 (zero), and lower atom numbers are
+   assumed to be used more often.
+
+3.1. Wire format.
+
+   The CBAR record as input to decompressor consists of integral number of
+   bytes, which total length is told to decompressor by upper protocol. CBAR
+   is inspired by SQLite Row Format [https://www.sqlite.org/fileformat2.html#record_format]
+   but using VarNibbles. CBAR contains a header and a body, in that order, each
+   of integral number of bytes. The header is a VarNibbles array, where each
+   VarNibble is an instruction (operation code) to decompressor, and body,
+   also called content area, contains bytes which are used by append to output
+   buffer instructions.
+
+   The header begins with a single VarNibble which determines the total number
+   of nibbles in the header. The VarNibble value is the size of the header in
+   nibbles including the size VarNibble itself, minus one. If size VarNibble
+   is special value zero, this means "decompressed data is empty byte string"
+   (in such a case, CBAR record MUST consist of a single byte 0x00, other
+   possible values for low nibble are reserved).
+
+   If header ended, but there are still unconsumed bytes in content area,
+   all of them are appended to output as if header had implicit last
+   instruction "append all bytes of remaining length". This allows to reduce
+   overhead of uncompressible data to just 1 single byte of CBAR header.
+
+   Following the size VarNibble are one or more additional VarNibbles, one
+   per instruction. These additional VarNibbles are called "serial code"
+   numbers and determine the instruction, according to the following chart:
+
+
+RFC 7400 quote:
+   +----------+---------------------------------------------+----------+
+   | code     | Action                                      | Argument |
+   | byte     |                                             |          |
+   +----------+---------------------------------------------+----------+
+   | 0kkkkkkk | Append k = 0b0kkkkkkk bytes of data in the  | k bytes  |
+   |          | bytecode argument (k < 96)                  | of data  |
+   |          |                                             |          |
+   | 1000nnnn | Append 0b0000nnnn+2 bytes of zeroes         |          |
+   |          |                                             |          |
+   | 10010000 | stop code (end of compressed data; see      |          |
+   |          | Section 3.2)                                |          |
+   |          |                                             |          |
+   | 101nssss | Set up extended arguments for a             |          |
+   |          | backreference: sa += 0b0ssss000,            |          |
+   |          | na += 0b0000n000                            |          |
+   |          |                                             |          |
+   | 11nnnkkk | Backreference: n = na+0b00000nnn+2;         |          |
+   |          | s = 0b00000kkk+sa+n; append n bytes from    |          |
+   |          | previously output bytes, starting s bytes   |          |
+   |          | to the left of the current output pointer;  |          |
+   |          | set sa = 0, na = 0                          |          |
+   +----------+---------------------------------------------+----------+
+
+TBD ssss nnn kkk widths for backref/args instructions
+
+   Serial Code |  Hex   | Action
+   ============+========+==============================================
+        0      |   0    | Append 0x00
+        1      |   1    | Append 0x01
+        2      |   2    | Prefix next element with CBOR Major 2 length
+        3      |   3    | Prefix next element with CBOR Major 3 length
+        4      |   4    | Append 0xf4 (CBOR false)
+        5      |   5    | Append 0xf5 (CBOR true)
+        6      |   6    | Append 0xf6 (CBOR null)
+        7      |   7    | Append 0xff
+        8      |   8    | Append 0x20 (CBOR -1)
+        9      |   9    | Append 1 content byte
+   ------------+--------+----------------------------------------------
+        10     |   a0   | Append 2 content bytes 
+        11     |   a1   | RLE: repeat last output
+        12     |   a2   | RLE: repeat last output 2 times
+        13     |   a3   | RLE: repeat last output 3 times
+        14     |   a4   | RLE: repeat last output 4 times
+        15     |   a5   | RLE: repeat last output 5 times
+        16     |   a6   | RLE: repeat last output 6 times
+        17     |   a7   | RLE: repeat last output 7 times
+        18     |   a8   | RLE: repeat last output 8 times
+        19     |   a9   | RLE: repeat last output 9 times
+      20..25   | aa..af | Reserved for future use
+   ------------+--------+---------------------------------------------
+    for N>=26:    R = 0 | Append atom with number M
+     set:         R = 1 | Set up extended arguments for backreference
+    M=(N-26)/4    R = 2 | Backreference
+    R=(N-26)%4    R = 3 | append M+3 content bytes
+
+TBD
+
+   To illustrate how different operations interact with others (especially
+   prefixes and RLE), the following pseudocode defines how decompressor
+   funstions use variables:
+
+    append(src, len):
+        if (src == NULL)
+	    throw decode error
+        if (prefix) {
+            char prefbuf[9]
+            pl = encode_cbor_uint(len)
+            prefbuf[0] |= (prefix == 2) ? 0x20 : 0x60
+
+            obuf[optr .. optr+pl-1] = prefbuf[0 .. pl-1]
+            optr += pl
+
+            prefix = 0;
+       }
+
+       obuf[optr .. optr+len-1] = src[0 .. len-1]
+       last_optr = optr
+       last_len  = len
+
+       optr += len
+
+    append_short(code):
+        shorts = {0x00, 0x01, NULL, NULL, 0xf4, 0xf5, 0xf6, 0xff, 0x20}
+        append(shorts[code], 1)
+
+    append_content(N):
+        append(content[iptr], N)
+	iptr += N
+
+
+    rle(count):
+        while (count-- > 0) {
+	    obuf[optr .. optr+last_len-1] = obuf[last_optr .. last_optr+last_len-1]
+	    optr += last_len
+	}
+
+    atom(M):
+        append(atoms[M][0], length(atoms[M]))
+
+    backreference(s, n):
+        append(obuf[optr - s], n)
+	sa = 0
+	na = 0
+
+TODO
+
+
+6. Using CBAR inside CBOR.
+
+   CBAR is a building block for other protocols, and some protocols may want
+   to augment CBOR decoder with CBAR decompressor. In such case, CBAR is
+   contained in a CBOR byte string (Major Type 2) inside a tagged array, and
+   from the consumer point of view result of CBAR decompression is "replaces"
+   this array. In this array, everything except CBAR bytestring is optional,
+   with default values defined by upper layer protocol.
+
+   Instead of directly supplying atoms array (where each atom number is just
+   index of string in array) with bytestring dictionary, applications may also
+   choose to just refer to some dictionary defined in other place, by
+   specifying it's hash for error checking. This is similar to specifying
+   CRC-32 / Adler-32 checksum of deflate dictionary in zlib library.
+
+TBD correct CDDL syntax
+
+   #6.10([atoms, bytedict, CBAR, checksum])
+
+   atomarr = [ + bstr ]
+
+   ? atoms = atomarr / uint / bstr,  ; direct atoms array or their hash
+   ? bytedict = bstr / uint,         ; directly byte dictionary or it's hash
+   CBAR = bstr .size (1..),
+   ? checksum = uint
+
+TODO

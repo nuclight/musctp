@@ -1844,7 +1844,9 @@ TBD no CBAR length, but just usual option format, and CBAR inside INIT option?
   TBD flag from server about "INIT opts/chunks are not ignored (no need to retransmit)"?
 
 TBD proxy - e.g. for inspecting by firewalls, service request?
-  TBD how to ATOM_CONFIG and timestamps via inspecting proxy?
+  TBD how to ATOM_CONFIG and timestamps via inspecting proxy as atom set could differ?
+  -> separate DUP flag from timestamp and pass them in CBAR; atoms and all
+     over config stream translated by proxy, except proxy.* subtree
 
 -- /variant unfragmented
 
@@ -2988,6 +2990,15 @@ Septinovile as 7 or 9 to be multiplier of usual length field?
       ...but this is almost the same as byte in variant SQL 2, always having
       length <=63 in 2 bytes
       -> put Root in LSB, invert 0/1 - then only long paths will have 2 bytes
+TBD if CBOR (not CBAR) then 1 bit if GHC
+  TBD do GHCompress of entire message instead of separate each row? so paths
+  could be compressed, too, while allowing for yet-unknown atoms
+  TBD keys sort order
+  - if CBOR, each atom is usually prefixed by CBOR byte, so each segment lengthened
+    -> put in compression opcodes for just atom and CBOR-prefixed atom?
+       - or may be use CBOR Tags 25/256 directly in parser?
+	 -> seems no, these have rules for increasing lenghts, but atom
+            numbering is independent
 
 TODO
 
@@ -3286,6 +3297,8 @@ QoS, потом 10 бит миллисекуд и 2 бита длины для �
 максимум 7 байт
 
 -- /variant 9
+
+TBD CBAR ?
 
 TODO
 
