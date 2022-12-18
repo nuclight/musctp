@@ -23,6 +23,15 @@ but use both Wi-Fi and EDGE links simultaneously, increasing bandwidth.
 
 1. Введение.
 
+Application-layer framing or application-level framing (ALF) is a method of allowing an application to use its semantics for the design of its network protocols.
+
+This procedure was first proposed by D. D. Clark and David L. Tennenhouse.[1] It works as follows:
+
+  *  The application splits the data into useful segments.
+  *      These segments are called ADUs (application data units).
+  *  The ADUs can be processed in any order.
+  *  The lower layers keep the ADU borders.
+
 1.1. Общий обзор.
 
    Ranging protocols (boundaries really are somewhat blurred) by upper scale:
@@ -1217,6 +1226,9 @@ TBD вариант Хаффмана 1-байтным:
    1111110g - 0..1   * unit=4 G   -> from 4 G    to max 8 G
    11111110 - 16 G
    11111111 - 32 G
+
+pyramint4:                             1000 1001 1010 1011 1100 1101 1110 1111  
+  0    1    2    3    4    5    6    7    8   16   32   64  128  256  512 1024
 
 TBD Pyramint9 for 2^45 perfectly matches max of 2^31 TSN * 16 Kb packet, has
 it enough granularity on low values to avoid SWS ?
@@ -2999,6 +3011,27 @@ TBD if CBOR (not CBAR) then 1 bit if GHC
        - or may be use CBOR Tags 25/256 directly in parser?
 	 -> seems no, these have rules for increasing lenghts, but atom
             numbering is independent
+
+
+if BE=10, then VarUInt32:
+
+        2              |  2 1          |      1        |
+        9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |a a a a a|b b b|c c c c c|d d d|e e e e e|f f f f f|g g g g|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+       pairs  = 0b0bbbdddfffff + 1 (1..2048 in 11 bits)
+       length = 0b0aaaaaccccceeeeegggg + 1 (1..512K in 19 bits)
+
+else if BE=11: just byte with pairs (1..256 pairs)
+TBD what if Get? some cases always 1 pair
+TBD not pairs, but entries? for triplets with last time e.g. for queries from last session,
+also "want reply" bit 
+
+TBD atom should be separate commands coz compression will try to use themselves to compress
+
+TBD Bitmap Ranges for GetAtomName?
 
 TODO
 
