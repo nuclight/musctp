@@ -10,7 +10,7 @@
 
    Nibble - half of byte, 4 bits, one hexadecimal digit.
 
-
+   Sextet - 6 bits, digit of 64-ary numeral system
 
 2. VarNibble.
 
@@ -34,6 +34,7 @@
      |  0xa  |B.Val. | Integer Values from 10 to 25            10 + 16 = 26
      +-+-+-+-+-+-+-+-+
 
+      0
       0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+
      |  0xb  | Biased Value  | Integer Values from 26 to 281   26 + 256 = 282
@@ -256,7 +257,7 @@ TBD ssss nnn kkk widths for backref/args instructions
          set:   R = 2 | Append M+3 content bytes
     M=(N-26)/4        |
     R=(N-26)%4        |
-                      | Backreference: n = na + (B % 15), s = (B / 16) + n,
+                      | Backreference: n = na + (B % 16), s = (B / 16) + n,
       if odd,         | append n bytes from previously output bytes,
        set B=(N-26)/2 | starting s bytes to the left of the current
                       | output pointer; set na = 0
@@ -343,7 +344,7 @@ TBD may be RFC 6920 ?
 
 TODO
 
-=========== variant with bytes & Pyramint5 instead of VarNibbles =====
+=========== Format with bytes & Pyramint5 instead of VarNibbles =====
 
    This is a variation of static Huffman encoding of unsigned integer, in
    a "pyramid" way, where first (most wide) is exact value, and each next level
@@ -399,6 +400,8 @@ pyramint4:                             1000 1001 1010 1011 1100 1101 1110 1111
    | 0x1f   31 | Stop code: append everything what left in literals
    +------------+------------------------------------+----------+
 
+TBD text string can't contain repeated runs of 00/f4/f5/f6/ff !
+
 
 main bytecodes:
    +-------------------+------------------------------------+----------+
@@ -433,18 +436,45 @@ main bytecodes:
    |                   | set sa = 0, na = 0
    +-------------------+------------------------------------+----------+
 
-perl -E 'use CBOR::XS; print encode_cbor {
+perl -E 'use CBOR::XS; sub true {1}; print encode_cbor [
    ["algorithm", "HMAC", "SHA1"] => true,
    ["algorithm", "HMAC", "SipHash", 0, 0] => 2,
    ["algorithm", "HMAC", "SipHash", 0, 1] => 4,
-   ["algorithm", "kex"] => ["curve25519-sha256", "curve25519-sha256@libssh.org", "ecdh-sha2-nistp256", "ecdh-sha2-nistp384", "ecdh-sha2-nistp521", "diffie-hellman-group-exchange-sha256", "diffie-hellman-group16-sha512", "diffie-hellman-group18-sha512", "diffie-hellman-group14-sha256", "diffie-hellman-group14-sha1"],
-   ["algorithm", "key"] => ["ssh-rsa", "rsa-sha2-512", "rsa-sha2-256", "ecdsa-sha2-nistp256", "ssh-ed25519"],
-   ["algorithm", "ciphers"] => ["chacha20-poly1305@openssh.com", "aes128-ctr", "aes192-ctr", "aes256-ctr", "aes128-gcm@openssh.com", "aes256-gcm@openssh.com", "aes128-cbc", "aes192-cbc", "aes256-cbc"],
+   ["algorithm", "kex"] => [
+   				"curve25519-sha256",
+				"curve25519-sha256@libssh.org",
+				"ecdh-sha2-nistp256",
+				"ecdh-sha2-nistp384",
+				"ecdh-sha2-nistp521",
+				"diffie-hellman-group-exchange-sha256",
+				"diffie-hellman-group16-sha512",
+				"diffie-hellman-group18-sha512",
+				"diffie-hellman-group14-sha256",
+				"diffie-hellman-group14-sha1"
+			],
+   ["algorithm", "key"] => [
+				"ssh-rsa",
+				"rsa-sha2-512",
+				"rsa-sha2-256",
+				"ecdsa-sha2-nistp256",
+				"ssh-ed25519"
+			],
+   ["algorithm", "ciphers"] => [
+				"chacha20-poly1305@openssh.com",
+				"aes128-ctr",
+				"aes192-ctr",
+				"aes256-ctr",
+				"aes128-gcm@openssh.com",
+				"aes256-gcm@openssh.com",
+				"aes128-cbc",
+				"aes192-cbc",
+				"aes256-cbc"
+			],
    ["assoc", "retrans", "max"] => 3,
    ["dev", "cpu", 0, "temperature"] => 64.1,
- }
+]' | hexdump -C
 00000000  90 83 49 61 6c 67 6f 72  69 74 68 6d 44 48 4d 41  |..IalgorithmDHMA|
-00000010  43 44 53 48 41 31 01 85  49 61 6c 67 6f 72 69 74  |CDSHA1..Ialgorit|
+00000010  43 44 53 48 41 31 f5 85  49 61 6c 67 6f 72 69 74  |CDSHA1..Ialgorit|
 00000020  68 6d 44 48 4d 41 43 47  53 69 70 48 61 73 68 00  |hmDHMACGSipHash.|
 00000030  00 02 85 49 61 6c 67 6f  72 69 74 68 6d 44 48 4d  |...IalgorithmDHM|
 00000040  41 43 47 53 69 70 48 61  73 68 00 01 04 82 49 61  |ACGSipHash....Ia|
@@ -483,8 +513,27 @@ perl -E 'use CBOR::XS; print encode_cbor {
 00000250  64 65 76 43 63 70 75 00  4b 74 65 6d 70 65 72 61  |devCcpu.Ktempera|
 00000260  74 75 72 65 fb 40 50 06  66 66 66 66 66           |ture.@P.fffff|
 
-perl -E 'use CBOR::XS; sub true {1}; print encode_cbor [
-   [30, 31, 32] => \1,              
+perl -E 'use CBOR::XS; print encode_cbor [
+   [30, 31, 32]		=> \1,              
+   [30, 31, 33, 0, 0]	=> 2,
+   [30, 31, 33, 0, 1]	=> 4,
+   [30, 34]		=> [35, 36, 37, 38, 39, 40, 41, 42, 43, 44],
+   [30, 45]		=> [46, 47, 48, 49, 50],
+   [30, 51]		=> [52, 53, 54, 55, 56, 57, 58, 59, 60],
+   [61, 62, 63]		=> 3,
+   [64, 65, 0, 66]	=> 64.1,
+]' | hexdump -C
+00000000  90 83 18 1e 18 1f 18 20  f5 85 18 1e 18 1f 18 21  |....... .......!|
+00000010  00 00 02 85 18 1e 18 1f  18 21 00 01 04 82 18 1e  |.........!......|
+00000020  18 22 8a 18 23 18 24 18  25 18 26 18 27 18 28 18  |."..#.$.%.&.'.(.|
+00000030  29 18 2a 18 2b 18 2c 82  18 1e 18 2d 85 18 2e 18  |).*.+.,....-....|
+00000040  2f 18 30 18 31 18 32 82  18 1e 18 33 89 18 34 18  |/.0.1.2....3..4.|
+00000050  35 18 36 18 37 18 38 18  39 18 3a 18 3b 18 3c 83  |5.6.7.8.9.:.;.<.|
+00000060  18 3d 18 3e 18 3f 03 84  18 40 18 41 00 18 42 fb  |.=.>.?...@.A..B.|
+00000070  40 50 06 66 66 66 66 66                           |@P.fffff|
+00000078
+perl -E 'use CBOR::XS; use Compress::LZF; print compress_best encode_cbor [
+   [30, 31, 32] => Types::Serialiser::true,
    [30, 31, 33, 0, 0] => 2,
    [30, 31, 33, 0, 1] => 4,
    [30, 34] => [35, 36, 37, 38, 39, 40, 41, 42, 43, 44],
@@ -492,16 +541,220 @@ perl -E 'use CBOR::XS; sub true {1}; print encode_cbor [
    [30, 51] => [52, 53, 54, 55, 56, 57, 58, 59, 60],
    [61, 62, 63] => 3,
    [64, 65, 0, 66] => 64.1,
-]' | hd       
-00000000  90 83 18 1e 18 1f 18 20  d9 56 52 01 85 18 1e 18  |....... .VR.....|
-00000010  1f 18 21 00 00 02 85 18  1e 18 1f 18 21 00 01 04  |..!.........!...|
-00000020  82 18 1e 18 22 8a 18 23  18 24 18 25 18 26 18 27  |...."..#.$.%.&.'|
-00000030  18 28 18 29 18 2a 18 2b  18 2c 82 18 1e 18 2d 85  |.(.).*.+.,....-.|
-00000040  18 2e 18 2f 18 30 18 31  18 32 82 18 1e 18 33 89  |.../.0.1.2....3.|
-00000050  18 34 18 35 18 36 18 37  18 38 18 39 18 3a 18 3b  |.4.5.6.7.8.9.:.;|
-00000060  18 3c 83 18 3d 18 3e 18  3f 03 84 18 40 18 41 00  |.<..=.>.?...@.A.|
-00000070  18 42 fb 40 50 06 66 66  66 66 66                 |.B.@P.fffff|
+]' | hd                                                                        
+00000000  78/09 90 83 18 1e 18 1f  18 20 f5 85#60 07/03 21  |x........ ..`..!|
+00000010  00 00 02#c0 09/02 01 04  82#20 09/15 22 8a 18 23  |......... .."..#|
+00000020  18 24 18 25 18 26 18 27  18 28 18 29 18 2a 18 2b  |.$.%.&.'.(.).*.+|
+00000030  18 2c#40 19/0b 2d 85 18  2e 18 2f 18 30 18 31 18  |.,@..-..../.0.1.|
+00000040  32#40 0f/1f!33 89 18 34  18 35 18 36 18 37 18 38  |2@..3..4.5.6.7.8|
+00000050  18 39 18 3a 18 3b 18 3c  83 18 3d 18 3e 18 3f 03  |.9.:.;.<..=.>.?.|
+00000060  84 18 40 18/08 41 00 18  42 fb 40 50 06 66#20 00  |..@..A..B.@P.f .|
+00000070 /00 66                                             |.f|
 
+
+TODO
+
+=========== Format with Sextets instead of VarNibbles =====
+
+VarSextet:
+
+ 0..31
+ 10aaaa bbbbbb                             - 10
+ 110aaa bbbbbb cccccc                      - 15
+ 1110aa bbbbbb cccccc dddddd               - 20
+ 11110a bbbbbb cccccc dddddd eeeeee        - 25
+ 11111a bbbbbb cccccc dddddd eeeeee ffffff - 31
+
+ 0..31
+ 10aaaa bbbbbb                             - 10
+ 1100aa bbbbbb cccccc                      - 14
+ 1101aa bbbbbb cccccc dddddd               - 20
+ 1110aa bbbbbb cccccc dddddd eeeeee        - 26
+ 1111aa bbbbbb cccccc dddddd eeeeee ffffff - 32
+
+ 0..39
+ 101aaa bbbbbb                             -  9
+ 1100aa bbbbbb                             - +8 = 768 total
+ 1101aa bbbbbb cccccc                      - 14
+ 1110aa bbbbbb cccccc dddddd               - 20
+ 1111aa bbbbbb cccccc dddddd eeeeee        - 26
+
+
+      0  
+      0 1 2 3 4 5
+     +-+-+-+-+-+-+
+     |   0..47   | Integers from 0 to 47, themselves
+     +-+-+-+-+-+-+
+
+      0          |    
+      0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 0 0| Biased Value  | Integer Values from 48 to 303  48 + 256 = 304
+     +-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0          |        1  |
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 0 1|       Biased Value        | 304 ... 16687    304 + 2^14 = 16688
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0          |        1  |           |    2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 1 0| Value as is (for simplicity), 20 bits |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0          |        1  |           |    2      |
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 1 1|       Value as is (for simplicity), 26 bits       |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+
+Header Opcode Length:
+
+    0x00 - empty string
+
+      0               
+      0 1 2 3 4 5 6 7 
+     +-+-+-+-+-+-+-+-+
+     |    1 .. 48    | Single Sextet 0 .. 47
+     +-+-+-+-+-+-+-+-+
+
+      0               
+      0 1 2 3 4 5 6 7 
+     +-+-+-+-+-+-+-+-+
+     |   49 .. 127   | Number of sextets, 2 .. 80
+     +-+-+-+-+-+-+-+-+
+
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 0|Number of sextets, 14 bits |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1|        Number of sextets, 22 bits         |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   Serial Code | Action
+   ============+==============================================
+       0..3    | Append 1..4 times 0x00
+       4..7    | Append 1..4 times 0xff
+         8     | Prefix next element with CBOR Major 2 length
+         9     | Prefix next element with CBOR Major 3 length
+        10     | Set up extended argument for backreference: na += 16
+        11     | Set up extended argument for backreference: na += 32
+        12     | Set up extended argument for backreference: na += 64
+        13     | Set up extended argument for backreference: na += 128
+        14     | Set up extended argument for backreference: na += 256
+   | 0x09   15 | Append 0x21 (CBOR int -2)
+   | 0x10   16 | Append 0x20 (CBOR int -1)
+   | 0x11   17 | Append 0x01 (CBOR int 1)
+   | 0x12   18 | Append 0x02 (CBOR int 2)
+   | 0x13   19 | Append 0x03 (CBOR int 3)
+   | 0x14   20 | Append 0xf4 (CBOR false)
+   | 0x15   21 | Append 0xf5 (CBOR true)
+   | 0x16   22 | Append 0xf6 (CBOR null)
+   | 0x17   23 | Append 0x2c (comma, CBOR -13, SSH list separator) 
+   | 0x18   24 | RLE: repeat last output
+   | 0x19   25 | RLE: repeat last output 2 times
+   ------------+---------------------------------------------
+    for N>=26:  R = 0 | Append atom with number M
+      if even,        |
+         set:   R = 2 | Append M+1 content bytes
+    M=(N-26)/4        |
+    R=(N-26)%4        |
+                      | Backreference: n = na + (B % 16), s = (B / 16) + n,
+      if odd,         | append n bytes from previously output bytes,
+       set B=(N-26)/2 | starting s bytes to the left of the current
+                      | output pointer; set na = 0
+
+
+TODO
+
+=========== Format with VarInt15 instead of VarNibbles =====
+
+as in bytes, no header area
+..or VarInt22 ? or make it not int but just short/mid/long
+
+
+      0               
+      0 1 2 3 4 5 6 7 
+     +-+-+-+-+-+-+-+-+
+     |0| Short codes | 
+     +-+-+-+-+-+-+-+-+
+
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1|0 0 0|Atom number, 0 .. 4095 |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1|Len-1|Backreference offset-1 | non-zero 3 bits, that is, 0x9..0xe
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1|1 1 1|Backreference offset-1 |  Length - 9   |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   +----------+----------------------------------------------+----------+
+   |  short   | Action                                       | Argument |
+   |  code    |                                              |          |
+   +----------+----------------------------------------------+----------+
+   | 0kkkkkkk | Append k = 0b0kkkkkkk + 1 bytes of data in   | k bytes  |
+   |          | the bytecode argument; k <= 80               | of data  |
+   |          |                                              |          |
+   | 0101kkkk | Append k = 0b0kkkk bytes of data in the      | k bytes  |
+   |          | bytecode argument, prefixed with their       | of data  |
+   |          | length in CBOR Major Type 2 (k+1 total);     |          |
+   |          | that is, first byte is 0x4k                  |          |
+   |          |                                              |          |
+   | 011rrvvv | Append n = 0b0rr + 1 identical bytes with    |          |
+   |          | value from table below; n is 1, 2 or 3 so    |          |
+   |          | rr is 0b000 to 0b010                         |          |
+   |          |                                              |          |
+   | 01111011 | Append byte 0xd6 (Tag cbor-packed)           |          |
+   |          |                                              |          |
+   | 01111100 | Append byte 0x2c (ASCII comma "," which is   |          |
+   |          | list separator in SSH)                       |          |
+   |          |                                              |          |
+   | 01111101 | Append two bytes 0xd8 0x19 (Tag stringref)   |          |
+   |          |                                              |          |
+   | 0111111a | stop code - end of compressed data;          |          |
+   |          | if a=0 then add all remaining literal bytes  |          |
+   |          | if a=1 then just stop                        |          |
+   +----------+----------------------------------------------+----------+
+
+
+   vvv | Byte  | Commentary 
+   ====+=======+==========================
+    0  | 0x00  | CBOR Integer 0
+    1  | 0x01  | CBOR Integer 1
+    2  | 0x02  | CBOR Integer 2
+    3  | 0x20  | CBOR Integer -1
+    4  | 0xf4  | CBOR false
+    5  | 0xf5  | CBOR true
+    6  | 0xf6  | CBOR null
+    7  | 0xff  | also commonly occurs repeated
+    
+   An uncompressed length before CBAR raw stream is encoded as single UTF-8
+   character as it was in [RFC 2279], that is, allowing values up to 2^31-1
+   in six bytes. Length 0 means that no compression was achieved, so remaining
+   data should be copied to output buffer as is, without applying
+   decompression. Stop codes allow to add data such as a checksum at end of
+   stream. If such checksum, or CRC, or hash, is used, then it MUST cover
+   uncompressed data. If space constraints are serious, but 16-bit
+   checksums/CRCs are considered weak, then CRC-24 [RFC 4880] could be
+   recommended.
 
 
 TODO
