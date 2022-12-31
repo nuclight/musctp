@@ -32,6 +32,11 @@ This procedure was first proposed by D. D. Clark and David L. Tennenhouse.[1] It
   *  The ADUs can be processed in any order.
   *  The lower layers keep the ADU borders.
 
+
+"Let's simplify user interface features" paradigm is bad and wrong, as seen on example
+of TCP-3 [IEN21] this leads to problems in strategic perspective
+
+
 1.1. Общий обзор.
 
    Ranging protocols (boundaries really are somewhat blurred) by upper scale:
@@ -1003,7 +1008,7 @@ TBD for some data be possible to not AUTH, it's simpler to have just one DATA op
 13 - SHUTDOWN_COMPLETE
 15 - SHUTDOWN / SHUTDOWN_ACK
 18 - ABORT
-21 - NAK # compress/HMAC fail
+21 - NAK # compress/HMAC fail / stream window full
 24 - CANCEL_BLOCK # ABANDON_BLOCKS
 31 - MTU_PROBE
 
@@ -1042,14 +1047,19 @@ say 0b10110 = 22
 
        0   1   2   3   4   5   6   7
      +---+---+---+---+---+---+---+---+...
-     |   Length, <= 23   |Opt. Delta | Option Data
+     | Length - 1, 0..22 |Opt. Delta | Option Data
+     +---+---+---+---+---+---+---+---+...
+
+       0   1   2   3   4   5   6   7
+     +---+---+---+---+---+---+---+---+...
+     | 1   0   1   1   1 |Auth Length|
      +---+---+---+---+---+---+---+---+...
 
 short chunks (0xC0..CF):
 
        0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15
      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
-     | 1   1   0   0 |   Chunk Length    |Chunk Type 0-13| B | E | S |
+     | 1   1   0   0 |   Chunk Length    |Chunk Type 0-13|Beg|End|Spe|
      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
 
 middle options (0xD0..DF):
@@ -1080,7 +1090,7 @@ ending of both short and long chunks when Auth Key set (means B=1 E=0):
 
        0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15
   ...+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
-   Length| 1   1   1 |  Chunk Type   |      Auth Key ID          | S |
+   Length| 1   1   1 |  Chunk Type   |      Auth Key ID          |Spe|
   ...+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
 
 TODO as options 4096 now, compressed in option instead of separate parser type
@@ -1089,16 +1099,15 @@ inside compressed container:
 
        0   1   2   3   4   5   6   7   8   9   10  11  12  13  14  15
      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
-     |              Chunk Length             |UsrChunkTyp| B | E | S |
+     |        Chunk Length + UserChunkType * 1170        |Beg|End|Spe|
      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
 
 inside compressed container when Auth Key set (means B=1 E=0):
 
-      0                   1                   2
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
-     |   Chunk Length    |1 1|UChType| Auth Key ID |S|
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+       0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23
+     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+...
+     |         Chunk Length + 7020          |UsrChTyp|     Auth Key ID    |Sp|
+     +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+...
 
 TBD make it B flag when Auth Key ID, for intermediate key change before ending (instead of SSN records)?
 
@@ -1113,6 +1122,8 @@ need, have packet sections?
  -> see frag variant Packet 2.1
 
 TBD begin/end AUTH directly in format instead of separate option?
+
+TBD FORWARD_TSN problem - skipped Partial Reliability blocks may have same TSN
 
 -- /variant 20
 
@@ -2514,6 +2525,12 @@ TODO смещение в DUP для докачки, использовать д�
    в шорт QoS=11 и дальше биты - номер 512-сектора, это блок-часть
    ...тогда как QoS в лонг формате?
 
+      0                   0                   1
+      0 1 2 3 4 5 6 7     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |0|QoS|PPL|T|Add|   |1| CBAR Length - 128, 32640 max|
+     +-+-+-+-+-+-+-+-+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
 Add: 00 = NULL, 01 = 1 byte << 9, 10 = 2 bytes << 1, 11 = 2 bytes << 1 + 1
 -> no, 2 bits ASh - shift 0/4/8/12 bits, and Add as VarUInt32
   TBD in CBAR also ASh os low 2 bits?
@@ -2525,6 +2542,23 @@ according to it
 PPID as first/only element in Presentation Layer sublist
 DUP is time_t only - always has lower uint32 as Add in CBAR?
 
+thisLength, type?
+userLength,
+offset,             ; also under DUP flag?
+cbarLength,
+[
+	QoS: 0..2,
+	DUP: bool,              ; TBD no need if just tv_sec presence
+	tv_sec: uint / null,    ; needed for inspecting proxy - move to TIMESTAMP opt?
+	tv_usec: uint / null,	; how to Add/Shift?
+	TTL: uint / null,
+	PresLayer: uint .size 2 / bstr / array,
+]
+
+0    - Add is 1 byte, shift is to get 10 bit - milliseconds
+1,2  - Add is 1/2 byte, shift is to get 20 bit - microseconds
+
+--
   Итого, в 24 доступных байтах на минимальном MSS=24 в среднем случае:
 
     * 2 байта TSN Base
