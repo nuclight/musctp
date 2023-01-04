@@ -1503,25 +1503,6 @@ TBD до скольки? 6 бит? 5 бит? из компрессии CTag:28+K
 TBD прочекать бэкенды - может таки CookieLen до 6 бит поднять
  -> таки да
 
-а в бэкендах можно 2 бита на max.2 фрагмента и четвертое как Last Indicator
-
-   0 - 1/1 - Unfragmented          0 - normal data
-   1 - 1/2                         1 - normal data, Last Indicator
-   2 - 1/3                         2 - INIT/ACK, Unfragmented
-   3 - 1/4                         3 - INIT/ACK, Frag 1 of 2
-   4 - 1/5                         4 - INIT/ACK, Frag 2 of 2
-   5 - 2/2                         5 - INIT/ACK, Frag 1 of 3
-   6 - 2/3                         6 - INIT/ACK, Frag 2 of 3
-   7 - 2/4                         7 - INIT/ACK, Frag 3 of 3
-   8 - 2/5
-   9 - 3/3
-  10 - 3/4
-  11 - 3/5
-  12 - 4/4
-  13 - 4/5
-  14 - 5/5
-  15 - Error/fragcookie
-
 проблема Frags - в хранении состояния INIT на сервере, а хотели избежать DDoS
 TBD для защиты от неё при выкачивании фрагментов ответа - какой-то токен? и MSS
 TBD значит G даже для UDP, и Connection Tag в не-первых
@@ -1529,13 +1510,13 @@ TODO убрать MAC Len|NonceLen из туннелей, добавить MSS|M
 реальный максимальный размер INIT от клиента - 264 байта: 4 TSN Base + 5 header
 + 15 параметров по 16 байт + их 15 байт, остается возможным 16-й для pad
 
-   Size Examples      MSS    PacketSiz INIT Fragmentation   MAC Len  Timestamp
-    XS  802.15.4 UDP6 24-31   33-40    10/11 frags, 5 bit   None     8.3
-     S  ICMP, ATM     32-40   48-56    Offsets in 6 bits    4-8      9.7
-     M  6LoWPAN HComp 48-64   60-80    5 frags in 4 bits    8-12     11.10
-     L  Censor base64 100-140 128-256  2-3 frags, 2-3 bits  8-16     14.10
-    XL  Old e.g. SLIP 256-512 296-576  None                 12-20    22.10
-   XXL  Normal IPv4   512+    576+     None                 16-32    32.14
+   Size Examples       MSS      Packet Size  MAC Len  Timestamp
+    XS  802.15.4 UDP6  24-31    33-40        None     UQ8.3
+     S  ICMP, ATM      32-40    48-56        4-8      UQ9.7
+     M  6LoWPAN HComp  48-64    60-80        8-12     UQ11.10
+     L  Censor base64  100-140  128-256      8-16     UQ14.10
+    XL  Old e.g. SLIP  256-512  296-576      12-20    UQ22.10
+   XXL  Normal IPv4/6  512+     576+         16-32    UQ32.14
 
 
 3.2. Параметры INIT/INIT_ACK.
@@ -5487,7 +5468,7 @@ VerSize - для различения, что size M и какая его вер
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |Ver|0| Packet Counter  |FEC N/L|PkCntWrap| tv_sec Low 11 bits  |
+     |VerSize|0| Packet Counter  |FEC/W/L|AjMAC| tv_sec Low 11 bits  |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSL|R|               Connection Verification Tag               |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -5500,11 +5481,12 @@ VerSize - для различения, что size M и какая его вер
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
-     /          MAC, optional, present / defined by Key Algo         /
-     \                                                               \
+     /         MAC, optional, present / defined by Key Algo,         /
+     \                 trimmed by AjMAC bytes                        \
+     /                                                               /
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-FEC Num/Last:
+FEC Num/Wrap/Last:
 - 0      - packet is not under FEC
 - 1..9   - data packet number for FEC
 - 10..13 - this is XOR-packet for X previous FEC-packets, first of them is
@@ -5513,7 +5495,7 @@ FEC Num/Last:
    11 = 5 packets 
    12 = 7 packets 
    13 = 9 packets 
-   14 = Reserved 
+   14 = PkCntWrap
    15 = not a FEC, but L - Last Indicator
 
 his format - XOR of _ciphertexts_ ! that is, all, except first 16 bits
@@ -5536,11 +5518,11 @@ INIT/ACK-пакет:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |Ver|1|K|TSL| tv_sec low 26 bits with Low 8 as Packet Counter   |
+     |VerSize|1|lgMSS|tv_sec low 24 bits / Low 6 as Packet Counter Hi|
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |T23|MTU| Frags |    Fragment Cookie, if fragged, 0 if error    |
-   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     .        Nonce, optional, present / defined if K=1 ...          .
+     |TSL|T23|K|PkCLo|                   Nonce,                      \
+   8 +-+-+-+-+-+-+-+-+                 optional,                     /
+     /                            present / defined if K=1 ...       \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
      /                    Actual INIT packet data                    /
@@ -5569,6 +5551,42 @@ TBD MTU in first frag - also as Flags e.g. Public Key of K=1
 
 TBD if variant INIT unfragged - move MTU to first byte of Fragment Cookie, which
 is CoAP (?) reply code if Frags=15/error
+
+lgMSS - limit MTU, safe MSS is:
+0    - 24 bytes
+1    - 32 bytes
+2..6 - 2^(4+lgMSS) bytes (that is, 6 means 1024 bytes)
+7 - 1440 on IPv4, 1408 on IPv6
+
+allows ~3 Gbit/sec = 8 * 2^10 bits tv_usec * 2^(9-1) bits Packet Counter * 1500 bytes Ethernet MTU
+
+
+size XXL - on 1280 MTU no need to separate INIT format:
+ 
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |VerSize|ServInstNum|FEC N/Wr/La|    Packet Counter, 16 bits    |
+   4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |TSL|R|               Connection Verification Tag               |
+   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |                     tv_sec, full 32 bits                      |
+  12 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |     Shared Key ID     |           tv_usec, 20 bits            |    
+  16 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     .        Nonce, optional, present / defined by Key Algo         .
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /                    Actual INIT packet data                    /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /         HMAC, optional, present / defined by Key Algo         /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+this is exactly 1440 byte MSS on IPv4: 1472 UDP - 16 header - 16 HMAC,
+with header used as nonce
 
 
 TODO
@@ -5716,7 +5734,7 @@ IPv4/IPv6 packet.
 Полк P - наличие/компрессия дополнительных 4 байт с портами:
      0   1   2   3   4   5   6   7
    +---+---+---+---+---+---+---+---+
-   |Version|CSumCov| I | H |  Prt  |
+   |Version|CSumCov|Ini| H |  Prt  |
    +---+---+---+---+---+---+---+---+
 
    H - Have Ports, when 0 - no ports bytes, bit 6 is Src and 7 is Dst,
@@ -5783,17 +5801,320 @@ server and client port - then NAT is like for ICMP Echo/Reply
 TBD variable length timestamp / FEC fields ?
 
 
+
+Appendix L. Proposed "tunnel" in 6LoWPAN packet instead of IPv6.
+
+   As muSCTP is intended to be used together with 6LoWPAN suite, not strictly
+   instead, even this "instead of IPv6+UDP" mode is still registered in
+   6LoWPAN's NALP space of Dispatch byte. It is expected that one path between
+   endpoints is via generic 6LoWPAN and other, described in this Appendix, is
+   used on the same L2 segment after MAC addresses are discovered.
+
+   Dispatch byte(s) variants:
+   * 1a
+   * f2a3 = page 2 (number 675)
+
+then:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |Versi|0|CsC|Shared Key ID|PacketCounter|L|W|tv_sec Low 10 bits |
+   4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |TSL|R|               Connection Verification Tag               |
+   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |ServInstNum| tv_usec Hi 10 bits|   Checksum, optional, by CsC  | 
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     /         Nonce, optional, present / defined by Key Algo        /
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /             Actual packet data, probably encrypted            /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /          MAC, optional, present / defined by Key Algo         /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+ CsC - Checksum Presence / Coverage:
+ 0 - absent, integrity is by outer layer
+ 1 - present, only header 10 bytes are covered
+ 2 - present, only first 16 bytes are covered: header and (part of) Nonce
+ 3 - present, entire packet is covered
+
+1 and 2 are for cases when MAC is present and will catch errors
+
+TBD in 2 - are 16 bytes enough for nonce coverage?
+
+and INIT/ACK:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |Versi|1|TSL|T23|K|tv_us|PktCntr|           Checksum            |
+   4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |                         tv_sec, full                          |
+   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     .        Nonce, optional, present / defined if K=1 ...          .
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /                    Actual INIT packet data                    /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /         HMAC, optional, if K=1 - defined by Key Algo          /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+TODO
+
 TBD generalized endpoint, server system
 
 
 TODO
 
-Appendix R.I. Different sub-byte variable integers.
+
+Appendix F. Fragmentation techniques TBD put all abandoned ideas here?
+
+
+INIT Fragmentation 
+10/11 frags, 5 bit 
+Offsets in 6 bits  
+5 frags in 4 bits  
+2-3 frags, 2-3 bits
+None               
+None               
+
+а в бэкендах можно 2 бита на max.2 фрагмента и четвертое как Last Indicator
+
+   0 - 1/1 - Unfragmented          0 - normal data
+   1 - 1/2                         1 - normal data, Last Indicator
+   2 - 1/3                         2 - INIT/ACK, Unfragmented
+   3 - 1/4                         3 - INIT/ACK, Frag 1 of 2
+   4 - 1/5                         4 - INIT/ACK, Frag 2 of 2
+   5 - 2/2                         5 - INIT/ACK, Frag 1 of 3
+   6 - 2/3                         6 - INIT/ACK, Frag 2 of 3
+   7 - 2/4                         7 - INIT/ACK, Frag 3 of 3
+   8 - 2/5
+   9 - 3/3
+  10 - 3/4
+  11 - 3/5
+  12 - 4/4
+  13 - 4/5
+  14 - 5/5
+  15 - Error/fragcookie
+
+
+
+TODO
+
+Appendix I. Different sub-byte variable integers.
 
 2 for only VERY short (4/6/8 bits total, 0..63)
 
 3,4,5,6 bits - 7 is too long to converge
 
+I.2. VarNibble.
+
+   This is a variable-length integer encoding on the sub-byte resolution. It
+   occupies integral number of nibbles and utilizes addition scheme in
+   a manner similar to CoAP [RFC 7252] option delta encoding: the lowest
+   possible values are encoded as themselves, and at each increasing of length
+   value zero of expanded bitfield is total 
+
+   Enconding                                               Total values / zero
+                                                           of next level's
+      0                                                    Biased Value
+      0 1 2 3
+     +-+-+-+-+
+     | 0..9  | Integers from 0 to 9, themselves
+     +-+-+-+-+
+
+      0               
+      0 1 2 3 4 5 6 7 
+     +-+-+-+-+-+-+-+-+
+     |  0xa  |B.Val. | Integer Values from 10 to 25            10 + 16 = 26
+     +-+-+-+-+-+-+-+-+
+
+      0
+      0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+
+     |  0xb  | Biased Value  | Integer Values from 26 to 281   26 + 256 = 282
+     +-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |  0xc  | Biased Value, 12 bits | ...and so on            282 + 4096
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1                   
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |  0xd  |     Biased Value, 16 bits     |                 4378 + 65536
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |  0xe  |         Biased Value, 20 bits         |         69914 + 1048576
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |  0xf  |             Biased Value, 24 bits             | 1118490 + 2^24
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   For example, integer value 17 is encoded as two nibbles 0xa7, and value 42
+   is encoded as three nibbles 0xb14.
+
+===
+
+bytes?
+
+>32:
+
+ 0..127
+ 10aaaaaa bbbbbbbb                                     - 14
+ 1100aaaa bbbbbbbb cccccccc                            - 20
+ 1101aaaa bbbbbbbb cccccccc dddddddd                   - 28
+ 1110aaaa bbbbbbbb cccccccc dddddddd eeeeeeee          - 36
+ 1111aaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff - 42
+
+ 0..159
+ 101aaaaa bbbbbbbb                             - 13
+ 1100aaaa bbbbbbbb                             - +12 = ?? total
+ 1101aaaa bbbbbbbb cccccccc                    - 20
+ 1110aaaa bbbbbbbb cccccccc dddddddd           - 28
+ 1111aaaa bbbbbbbb cccccccc dddddddd eeeeeeee  - 36
+
+ 0..191
+ 110aaaaa bbbbbbbb                                                       - 13
+ 11100aaa bbbbbbbb cccccccc                                              - 19
+ 11101aaa bbbbbbbb cccccccc dddddddd                                     - 27
+ 111100aa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 34
+ 111101aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 42
+ 111110aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg          - 50
+ 111111aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg hhhhhhhh - 58
+
+ 0..143
+ 1001aaaa bbbbbbbb                                                       - 12
+ 1010aaaa bbbbbbbb cccccccc                                              - 20
+ 1011aaaa bbbbbbbb cccccccc dddddddd                                     - 28
+ 1100aaaa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 36
+ 1101aaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 44
+ 1110aaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg          - 52
+ 1111aaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg hhhhhhhh - 60
+
+ 0..143
+ 1001aaaa bbbbbbbb                                                       - 12
+ 10100aaa bbbbbbbb cccccccc                                              - 19
+ 11aaaaaa bbbbbbbb cccccccc dddddddd                   - 30
+ 1010100a bbbbbbbb cccccccc dddddddd eeeeeeee                            - 33
+ 1010101a bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 41
+ 101011aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg          - 50
+ 1011aaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg hhhhhhhh - 60
+
+ 0..127
+ 100aaaaa bbbbbbbb                                                       - 13
+ 10100aaa bbbbbbbb cccccccc                                              - 19
+ 11aaaaaa bbbbbbbb cccccccc dddddddd                   - 30
+ 1010100a bbbbbbbb cccccccc dddddddd eeeeeeee                            - 33
+ 1010101a bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 41
+ 101011aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg          - 50
+ 1011aaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg hhhhhhhh - 60
+
+32:
+
+ current:
+ 0..63
+ 01aaaaaa bbbbbbbb                                     - 14
+ 10aaaaaa bbbbbbbb cccccccc                            - 22
+ 11aaaaaa bbbbbbbb cccccccc dddddddd                   - 30
+
+ 0..127
+ 100aaaaa bbbbbbbb                                     - 13
+ 101aaaaa bbbbbbbb cccccccc                            - 21
+ 11aaaaaa bbbbbbbb cccccccc dddddddd                   - 30
+
+
+=========== Format with Sextets instead of VarNibbles =====
+
+Pentads:
+
+ 0..15
+ 10aaa bbbbb                         - 8  | log2(1024)*3/4 = 7.5
+ 110aa bbbbb ccccc                   - 12 
+ 1110a bbbbb ccccc ddddd             - 16
+ 11110 bbbbb ccccc ddddd eeeee       - 20
+ 11111 bbbbb ccccc ddddd eeeee fffff - 25
+
+ 0..19
+ 101aa bbbbb                         - 7  | log2(1024)*3/4 = 7.5
+ 1100a bbbbb                         - +6 = 192 total, log2 ~= 7.58
+ 1101a bbbbb ccccc                   - 11 | log2(2^15)*3/4 = 11.25 ! too waste
+ 1110a bbbbb ccccc ddddd             - 16
+ 11110 bbbbb ccccc ddddd eeeee       - 20
+ 11111 bbbbb ccccc ddddd eeeee fffff - 25
+
+VarSextet:
+
+      0  
+      0 1 2 3 4 5
+     +-+-+-+-+-+-+
+     |   0..47   | Integers from 0 to 47, themselves
+     +-+-+-+-+-+-+
+
+      0          |    
+      0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 0 0| Biased Value  | Integer Values from 48 to 303  48 + 256 = 304
+     +-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0          |        1  |
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 0 1|       Biased Value        | 304 ... 16687    304 + 2^14 = 16688
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0          |        1  |           |    2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 1 0| Value as is (for simplicity), 20 bits |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0          |        1  |           |    2      |
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 1 1|       Value as is (for simplicity), 26 bits       |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+ 0..31
+ 10aaaa bbbbbb                             - 10
+ 110aaa bbbbbb cccccc                      - 15
+ 1110aa bbbbbb cccccc dddddd               - 20
+ 11110a bbbbbb cccccc dddddd eeeeee        - 25
+ 11111a bbbbbb cccccc dddddd eeeeee ffffff - 31
+
+ 0..31
+ 10aaaa bbbbbb                             - 10
+ 1100aa bbbbbb cccccc                      - 14
+ 1101aa bbbbbb cccccc dddddd               - 20
+ 1110aa bbbbbb cccccc dddddd eeeeee        - 26
+ 1111aa bbbbbb cccccc dddddd eeeeee ffffff - 32
+
+ 0..39
+ 101aaa bbbbbb                             -  9
+ 1100aa bbbbbb                             - +8 = 768 total
+ 1101aa bbbbbb cccccc                      - 14
+ 1110aa bbbbbb cccccc dddddd               - 20
+ 1111aa bbbbbb cccccc dddddd eeeeee        - 26
+
+
+
+
+TODO
 
 Appendix R.T. Research on Timestamps / TSN.
 

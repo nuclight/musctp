@@ -554,31 +554,6 @@ perl -E 'use CBOR::XS; use Compress::LZF; print compress_best encode_cbor [
 
 TODO
 
-=========== Format with Sextets instead of VarNibbles =====
-
-VarSextet:
-
- 0..31
- 10aaaa bbbbbb                             - 10
- 110aaa bbbbbb cccccc                      - 15
- 1110aa bbbbbb cccccc dddddd               - 20
- 11110a bbbbbb cccccc dddddd eeeeee        - 25
- 11111a bbbbbb cccccc dddddd eeeeee ffffff - 31
-
- 0..31
- 10aaaa bbbbbb                             - 10
- 1100aa bbbbbb cccccc                      - 14
- 1101aa bbbbbb cccccc dddddd               - 20
- 1110aa bbbbbb cccccc dddddd eeeeee        - 26
- 1111aa bbbbbb cccccc dddddd eeeeee ffffff - 32
-
- 0..39
- 101aaa bbbbbb                             -  9
- 1100aa bbbbbb                             - +8 = 768 total
- 1101aa bbbbbb cccccc                      - 14
- 1110aa bbbbbb cccccc dddddd               - 20
- 1111aa bbbbbb cccccc dddddd eeeeee        - 26
-
 
       0  
       0 1 2 3 4 5
@@ -755,6 +730,9 @@ as in bytes, no header area
    uncompressed data. If space constraints are serious, but 16-bit
    checksums/CRCs are considered weak, then CRC-24 [RFC 4880] could be
    recommended.
+
+TODO
+
 
 
 TODO
