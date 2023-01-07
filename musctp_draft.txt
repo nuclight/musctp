@@ -32,9 +32,42 @@ This procedure was first proposed by D. D. Clark and David L. Tennenhouse.[1] It
   *  The ADUs can be processed in any order.
   *  The lower layers keep the ADU borders.
 
+[QUIC-APPLICABILITY]:
+in comparison to QUIC, muSCTP does not need fallback protocol, tunnels are for this
+
+QUIC problems: increased deadlock probabilty, 
+   Once stream limits are reached, no more streams can be opened,
+   which prevents applications using QUIC from making further progress
+
+QUIC does not provide any mechanism for graceful connection termination;
+
+QUIC DATAGRAM extension [RFC 9221] does not allow ordering inside streams or
+window control, while muSCTP allows this,and time, for unordedered chunks
+
+
+RFC 8546 wire image:
+   is that all
+   observable parts of a protocol's wire image will eventually be used
+   by devices on path.  Consequently, changes or future extensions that
+   affect the observable part of the wire image become difficult or
+   impossible to deploy.
+
+4.1: Integrity protection of the wire image may
+   itself help protect against accidental invariance, because read-only
+   wire images invite less meddling than path-writable wire images.  The
+   techniques discussed in [USE-IT] may also be useful in further
+   preventing accidental invariance and ossification.
+
+
+
+for example, QUIC's spin bit (an ugly kludge for measuring RTT
+by on-path observers) is easily replaced by unencrypted packets with
+HEARTBEAT, ECHO. ECNE_CWR and LINK_INFO options
 
 "Let's simplify user interface features" paradigm is bad and wrong, as seen on example
-of TCP-3 [IEN21] this leads to problems in strategic perspective
+of TCP-3 [IEN21] this leads to problems in strategic perspective; [RFC 9170]
+also states about bad assumptions in the protocol design about performance constraints
+(read: variable-length fields)
 
 
 1.1. Общий обзор.
@@ -490,8 +523,19 @@ TBD от сервера младшие биты про packet stamp:
  11 - packet id reused for server next data
 TBD вынести их в TSL? но тогда
 TBD после смены адреса сервер шлёт меньше - защита от спуфа/DDoS
-TBD Stateless Reset Token?
 TBD Ack Delay в SACK ?
+
+TBD Stateless Reset Token?
+https://datatracker.ietf.org/doc/html/draft-trammell-plus-statefulness-04 :
+4.3.1.  Authenticated Stop Signaling
+   Additionally, the stop and stop confirmation signals could be
+   designed to authenticate themselves.  Each endpoint could reveal a
+   stop hash during the initial association, which is the result of a
+   chosen cryptographic hash function applied to a stop token which that
+   endpoint keeps secret.  An endpoint wishing to end the association
+   then reveals the stop token, which can be verified both by the far
+   endpoint and devices on path which have cached the stop hash to be
+   authentic. 
 
   В случае относительно низкой скорости (в пакетах) передачи данных, на низких
   MTU используется компрессия Transmission Sequence Number (TSN) Base -
@@ -2525,7 +2569,7 @@ DUP is time_t only - always has lower uint32 as Add in CBAR?
 
 thisLength, type?
 userLength,
-offset,             ; also under DUP flag?
+offset,             ; also under DUP flag? 20 bits enough
 cbarLength,
 [
 	QoS: 0..2,
@@ -2538,7 +2582,60 @@ cbarLength,
 
 0    - Add is 1 byte, shift is to get 10 bit - milliseconds
 1,2  - Add is 1/2 byte, shift is to get 20 bit - microseconds
+..
 
+no, let's think TSN layer provides us with full 20 bits, so Add to full msgid
+have to be at most 10 bit.. may be shifted?
+or 2-bit Add as method number, default method 0 is low bits of stream num
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |TSN Layer|B|E|U|F|L|           Stream Sequence Number          |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |      Stream ID, VarInt15      | Flags-dependent length fields .
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     /                                                               \
+     \         Control and/or User Data, at least 1 byte             /
+     /                                                               \
+     +---------------------------------------------------------------+
+
+B E F L
+1 1 1 0 - single chunk, first block  - chunkLength=NULL, user part of thisLength MUST multiple 1K
+1 1 1 1 - single chunk, single block - chunkLength=NULL, thisLength not needed
+1 0 1 0 - first chunk, first block   - chunkLength > 0,  user part of thisLength MUST multiple 1K
+1 0 1 1 - first chunk, single block  - chunkLength > 0,  thisLength not needed
+
+userLength/offset are possible even in single block, e.g. continue small tail
+from previous sess
+
+middle block, beginning chunk:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |TSN Layer|B|0|U|0|0|           Stream Sequence Number          |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |      Stream ID, VarInt15      | Length in 1K  |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     /                                                               \
+     \                  User Data, at least 1 byte                   /
+     /                                                               \
+     +---------------------------------------------------------------+
+
+last block, beginning chunk:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |TSN Layer|B|0|U|0|1|           Stream Sequence Number          |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |      Stream ID, VarInt15      |        Length, VarInt15       |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     /                                                               \
+     \                  User Data, at least 1 byte                   /
+     /                                                               \
+     +---------------------------------------------------------------+
 --
   Итого, в 24 доступных байтах на минимальном MSS=24 в среднем случае:
 
@@ -3205,6 +3302,8 @@ this timestamp) was not received?
 TBD REWIND_BLOCKS is not needed due to different space - MsgID is by
 Timestamp, SSN is low level to put it in API
 
+TBD make (application) stream error codes also in STREAM_CONTROL 
+
 4. TODO INTERCHUNK_STREAM_CONTROL: управление потоками
 
 Partial Reliability
@@ -3372,6 +3471,250 @@ QoS, потом 10 бит миллисекуд и 2 бита длины для �
 -- /variant 9
 
 TBD CBAR ?
+
+-- variant VarSextet:
+
+   Chunk format:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |TSN Layer|B|E|RemLength, if E=0|  tv_sec Subtract, VarUInt32   |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /                     Commands, VarSextets                      /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   Note there is no Stream Sequence Number, to save space and to allow message
+   rates as high as per each TSN regardless of in-flight number, but this
+   means that receiver processes STREAM_CONTROL messages only when Cumulative
+   TSN Ack point is reached.
+
+   The Remaining Length field, present if BE=10, uses S bit as high bit (if
+   BE=11 then S bit MUST be ignored) and specifies length after first chunk:
+   for example, Remaining Length equal to 511 in B-chunke with 256 bytes after
+   header means 768 byte message in total.
+
+   The tv_sec Subtract header field is subtracted from tv_sec part of timestamp
+   of TSN chunk to get BaseTime value used in subsequent delta-coding of
+   message IDs. As VarUInt32 is limited to 30 bits, that means that on minimal
+   MSS (without space for DUP TIMESTAMP) session can not be interrupted for
+   more than approximately 34 years.
+
+   Next follows VarSextets array with operation codes till the end of chunk.
+   It has no explicit length specified and MUST be padded with zero bits - in
+   case of 6 bit padding, full sextet, it would be interpreted as switch to
+   stream 0, which is harmless.
+
+   After decoding, integers are read from array one by one, command integer
+   contains an immediate argument inside itself and may have zero or more
+   arguments (also integers, of course), which are then consumed from array
+   depending on command.
+
+   General command (opcode) integer format:
+
+        2         2 1                 1         
+        5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |            Immediate argument             |Command|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   Commands and meaning of their immediate argument:
+
+     N | Command       | Immediate argument    | Explicit argument count
+     ==+===============+=======================+========================
+     0 | SWITCH_STREAM | Stream number         | 0
+     1 | WINDOW_ADJUST | Set/Shift/NULL/parent | 0 or 1
+     2 | QOS_REJECT    | ErrCode + MsgID low 2 | 2
+     3 | QOS_PARTIAL   | LengthK + MsgID low 2 | 0
+     4 | QOS_ACK       | Message ID low 2 bits | 2
+     5 | QOS_REC       | Message ID low 2 bits | 2
+     6 | QOS_REL       | Message ID low 2 bits | 2
+     7 | QOS_COMP      | Message ID low 2 bits | 2
+     8 | SKIP_BLOCKS   | (N << 3 ) + U         | N+1
+
+   Other command numbers are reserved and MUST be treated as errors.
+
+   The SWITCH_STREAM command does not need to correspond to real stream - it
+   merely updates current variables of parser, in pseudocode:
+
+     cur_stream := Immediate argument
+     cur_tv_sec := BaseTime
+
+   This stream number is later used not only for stream-operating commands,
+   but also to obtain full Message ID in QoS commands, by using low 10 bits of
+   cur_stream variable.
+
+   QoS commands have the following common format, drawn with arguments
+   as 3 integers (26 signinficant bits each) after decoding:
+
+        2         2 1                 1         
+        5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |       Error code / Saved Length       |Low|Command|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                    tv_sec Delta                   |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                   tv_usec as is                   |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   Message ID is obtained by pseudocode:
+
+     cur_tv_sec += tv_sec Delta
+     msgid_tv_sec := cur_tv_sec
+     msgid_low32  := (tv_usec << 12) | ((cur_stream & 1023) << 2) | Low
+
+   Error code is currently used only in QOS_REJECT command, in QOS_PARTIAL this
+   is Saved Length field.
+
+   Note that cur_tv_sec is reset to BaseTime at each stream switch, so sender
+   implementation is simplified to sort Message IDs only inside one stream.
+
+TODO reject codes
+
+   QOS_PARTIAL serves for retransmission of large messages after restoring
+   broken connections, it's immediate argument specified which part of long
+   message with this Message ID is successfully stored to stable storage,
+   in units of 1 K bytes (1024 bytes). This is used after connection restored
+   to save several round trip times which otherwise would be needed to reject
+   transfer started from very beginning and query remote from which offset
+   to resume, and, more importantly, buffers / congestion window (scarce
+   resource at connection start) bloated with already seen data.
+
+   QOS_ACK, QOS_REC, QOS_REL and QOS_COMP behave as similarly named ones in MQTT
+TODO copy behaviour description here from MQTT 5.0 standard
+
+   WINDOW_ADJUST command have the following common format, drawn with argument
+   as two integers (26 signinficant bits each) after decoding:
+
+        2         2 1                 1         
+        5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |            Arg15            |Shift|ArgType|Command|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                       Arg26                       |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   Explicit argument, named Arg26, is not always present, exact operation,
+   including possible re-parent of stream, is defined by ArgType in the
+   folowing table (where "<< S" means "shift left by value of Shift field"):
+
+            | No reparent          | Set NULL             | Set
+   Window   | operation            | parent               | parent
+   ---------+----------------------+----------------------+---------------------
+   Set NULL | 0.                   | 1.                   | 2.
+            | window := NULL       | window := NULL       | window := NULL
+            |                      | parent := NULL       | parent := Arg15 << S
+   ---------+----------------------+----------------------+---------------------
+   Adjust,  | 3.                   | 4.                   | 5.
+   short    | window += Arg15 << S | window += Arg15 << S | Reserved
+   argument |                      | parent := NULL       | 
+   ----------+----------------------+----------------------+---------------------
+   Adjust,  | 6.                   | 7.                   | 8.
+   long     | window += Arg26 << S | window += Arg26 << S | window := Arg26 << S
+   argument |                      | parent := NULL       | parent := Arg15
+   ----------+----------------------+----------------------+---------------------
+   Set,     | 9.                   | 10.                  | 11.
+   short    | window := Arg15 << S | window := Arg15 << S | Reserved
+   argument |                      | parent := NULL       | 
+   ---------+----------------------+----------------------+---------------------
+   Set,     | 12.                  | 13.                  | 14.
+   long     | window := Arg26 << S | window := Arg26 << S | window := Arg26 << S
+   argument |                      | parent := NULL       | parent := Arg15
+   ---------+----------------------+----------------------+---------------------
+
+   That is, values 5, 11 and 15 of ArgType are reserved and MUST be treated
+   as error. Argument (Arg26) is present only if ArgType is 6, 7, 8, 12, 13
+   or 14.
+
+   Note that maximum Shift value is 7, which allows 33-bit values. As 32-bit
+   implementations have to keep their window as signed value, sender MUST put
+   such values that, after calculations, window will not exceed 2^31-1 bytes,
+   unless an extension was negotiated at INIT stage.
+
+   Finally, SKIP_BLOCKS command is used to report to receiver that particular
+   Stream Sequence Numbers of DATA chunks are abandoned, either by Partial
+   Reliability procedure or as a result of previous QOS_REJECT request from
+   receiver.
+
+        2         2 1                 1         
+        5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |  N (number of arguments minus one)  |ChT/U|Command|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |   Stream Sequence Number of first skipped block   |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                        Arg1                       |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                        Arg2                       |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       \                                                   \
+       /                        ...                        /
+       \                                                   \
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                        ArgN                       |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   The ChunkType/U field is mainly for future extensibility, only two
+   values are defined now, all other MUST be treated as error:
+
+   000 - chunk USER_MESSAGE, Ordered
+   001 - chunk USER_MESSAGE, Unordered
+
+   Then N field gives how many arguments are taken, after mandatory argument,
+   which equals to Stream Sequence Number of first skipped block in this
+   stream.
+
+   Each argument integer after the SSN has the following format:
+
+        2         2 1                 1         
+        5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |      Delta to next SSN (after bitmap)     |Bitmap |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   Bitmap field tells state of first four consecutive numbers (from MSB
+   to LSB, 0 is not skipped block and 1 means skipped) after point
+   where previous argument left off, and then Delta is the number to add to
+   them to get number of next skipped block.
+
+   For example, let's say skipped block number from previous step (or first)
+   was 1000. Then bitmap says about blocks 1001, 1002, 1003 and 1004, and
+   Delta + 1004 will be number of next skipped block. Note that Delta could be
+   zero, then current block number doesn't change (e.g. at end of arguments).
+
+   Longer example:
+
+        2         2 1                 1         
+        5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                  3                  |0 0 1|1 0 0 0|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                      1000                         |
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                   13                      |1 1 0 1|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                    1                      |0 0 0 1|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |                    0                      |0 1 0 1|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   Here, block 1000 skipped by argument zero, first argument skips
+   blocks 1001, 1002, 1004, 1017, second 1021, 1022 and third 1024, 1026.
+
+   Five decoded integers of this example are serialized into following
+   VarSextets (dot delimits prefix for clarity):
+   
+   101.101 110000             <- 3*128+24-40 = 368, prefix 0b101
+   1101.00 001111 101000      <- 1000 need 14 bits, prefix 0b1101
+   101.010 110101             <- 13*16+8+4+1-40 = 181, prefix 0b101
+   0.10001
+   0.00101
+
+   Also note that inside one stream all skipped blocks MUST be within allowed
+   SSN range, in particluar, this means counter MUST not exceed allowed number
+   of SSN's in flight, that is, 2^(SSN width)-1 from the lowest SSN.
 
 TODO
 
@@ -3860,13 +4203,15 @@ Delta:
 11 - 1/2000 = 500 us
 12 - tv_usec / 250 = 250 us   # не годится в 100 мкс 
 13 - tv_usec / 500 = 125 us   # не годится в 2 мкс и 10 мкс
-14 - вариант: 100 мкс
+14 ? вариант: 100 мкс
 15 - variant: tv_usec / 25000 = 40 us
 16 - variant: tv_usec / 50000 = 20 us
 17 - tv_usec / 100000 = 10 us
 18 - variant: tv_usec / 250000 = 4 us
 19 - variant: tv_usec / 500000 = 2 us
 20 - 1 us
+
+TODO other multipliers for 14-17
 
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -4871,6 +5216,15 @@ src IP/port to victim - server responds to victim
 
 TBD FEC
 
+
+RFC 7540                         HTTP/2                         May 2015
+   For example, if the client sends 60 KB immediately on connection
+   establishment and the server sets the initial window size to be 16
+   KB, the client will recalculate the available flow-control window to
+   be -44 KB on receipt of the SETTINGS frame.  The client retains a
+   negative flow-control window until WINDOW_UPDATE frames restore the
+   window to being positive, after which the client can resume sending.
+
 /=== quotes from other protocols ===
 
 6. User Data Transmission
@@ -5468,7 +5822,7 @@ VerSize - для различения, что size M и какая его вер
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSize|0| Packet Counter  |FEC/W/L|AjMAC| tv_sec Low 11 bits  |
+     |VerSize|0|OnP| Packet Counter  |FEC/W/L|T| tv_sec Low 11 bits  |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSL|R|               Connection Verification Tag               |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -5482,7 +5836,7 @@ VerSize - для различения, что size M и какая его вер
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
      /         MAC, optional, present / defined by Key Algo,         /
-     \                 trimmed by AjMAC bytes                        \
+     \                 trimmed if T flag set                         \
      /                                                               /
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
@@ -5511,9 +5865,12 @@ will flush FEC queue TBD and what? if on-path attacker could delete packets,
 this will achieve same effect
 -> report false XOR-packets (MAC failures after reconstruct) in ECNE_CWR ?
 
+OnP field is explicitly reserved for on-path devices to help problem of
+Section 4 of [RFC 8546], thus, it MUST NOT be included in HMAC calculation
+TBD need we consider [RFC 8558] ?
 
 
-INIT/ACK-пакет:
+INIT/ACK-packet:
 
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -5566,7 +5923,7 @@ size XXL - on 1280 MTU no need to separate INIT format:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSize|ServInstNum|FEC N/Wr/La|    Packet Counter, 16 bits    |
+     |VerSize|ServInstNum|OnP|FEC/W/L|    Packet Counter, 16 bits    |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSL|R|               Connection Verification Tag               |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -5922,6 +6279,8 @@ I.2. VarNibble.
    possible values are encoded as themselves, and at each increasing of length
    value zero of expanded bitfield is total 
 
+The LLVM documentation describes a field that uses 4-bit chunk, with each chunk consisting of 1 bit continuation and 3 bits payload.[9]
+
    Enconding                                               Total values / zero
                                                            of next level's
       0                                                    Biased Value
@@ -6251,6 +6610,7 @@ to keep 65536 TSNs ?
 - note that in theory, each SSN of Unordered is like child ordered stream
 -> limit TSN Offset for Unordered to 1 byte ? then only 256 TSN's to keep
    TBD if keep 256 anyway, then save 1 byte for StreamID ?
+-> or pass SSN for Unordered, unfortunately this is unavoidable
 
 [consequencing thought by bird_of_Luck] what if untangle StreamID from actual
 user API for letting protocol to decide where to put next message for HoL ?
@@ -6319,6 +6679,29 @@ TBD there is problem with child stream ordering for e.g. stderr on SSH ?
 e.g. if we put SSH_MSG_CHANNEL_EXTENDED_DATA into child stream and packet
 loss occurs, user will see stdout & stderr in different order
 TBD but is it critical ?
+
+If a client makes concurrent requests with the incremental parameter set to false, there is no benefit in serving responses with the same urgency concurrently because the client is not going to process those responses incrementally. Serving non-incremental responses with the same urgency one by one, in the order in which those requests were generated, is considered to be the best strategy.
+
+HTTP ecosystem problem:
+   It is designed to encourage faithful implementation and good
+   interoperability.  Therefore, an implementation that tried to be
+   helpful by being more tolerant of input would make interoperability
+   worse, since that would create pressure on other implementations to
+   implement similar (but likely subtly different) workarounds.
+...
+   To further assure that this extensibility is available in the future,
+   and to encourage consumers to use a complete parser implementation, a
+   field definition can specify that "grease" parameters be added by
+   senders.  A specification could stipulate that all parameters that
+   fit a defined pattern are reserved for this use and then encourage
+   them to be sent on some portion of requests.  This helps to
+   discourage recipients from writing a parser that does not account for
+   Parameters.
+
+what the shit is HTTP/2:
+   Each header block is processed as a discrete unit.  Header blocks
+   MUST be transmitted as a contiguous sequence of frames, with no
+  interleaved frames of any other type *or from any other stream*.
 
 
 TODO
