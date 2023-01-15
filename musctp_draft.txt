@@ -1072,7 +1072,7 @@ TBD перенести компрессию на уровень TSN - по по�
    and neither 0xFD nor 0xFB are compressed.  Other PPP packets are
    always sent uncompressed.  Control packets are infrequent and should
    not be compressed for robustness.
-   -> это оставляет только 12 бит, и еще минус два значения (0xfb/0xfd)
+   -> this leaves only 11 bits (Hi LSB must be 0), and minus two values (0xfb/0xfd)
    вариант: на длину внутреннего чанка их
    TBD Bitmap Ranges по номерам TSN ?
    -> no, deflate outputs CRC-32 only at end of stream, not at block, so this
@@ -1127,7 +1127,7 @@ long chunks (0xE8..EF):
       0                   1                   2
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
-     |1 1 1 0 1|      Chunk Length     |ChuType|B|E|S|
+     |1 1 1 0 1|      Chunk Length     |ChuType|B|E|S|     <- hey, here's 12 bit!
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
 
 ending of both short and long chunks when Auth Key set (means B=1 E=0):
@@ -1146,6 +1146,7 @@ inside compressed container:
      |        Chunk Length + UserChunkType * 1170        |Beg|End|Spe|
      +---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+---+...
 
+TBD our max size is 4096, thus should be 4096/3 = 1365
 inside compressed container when Auth Key set (means B=1 E=0):
 
        0  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23
@@ -1156,7 +1157,6 @@ inside compressed container when Auth Key set (means B=1 E=0):
 TBD make it B flag when Auth Key ID, for intermediate key change before ending (instead of SSN records)?
 
 F0...F7 = Flags, or Internal Padding, if all-zero
-
 F8 - Option Delta += 128
 
 then as in variant 19
@@ -1167,7 +1167,125 @@ need, have packet sections?
 
 TBD begin/end AUTH directly in format instead of separate option?
 
-TBD FORWARD_TSN problem - skipped Partial Reliability blocks may have same TSN
+TBD FORWARD_TSN bundling problem - skipped and unskipped Partial Reliability blocks may have same TSN
+TBD large packet, same stream, bundle end of one message with beginning of next or several msgs
+TBD both solvable, real problem is NAK due to window for *part* of TSN
+-> make new bitmap opt instead of TSN Delta in each? also flags in it
+TBD if return to TSN per chunk, then fragments - it allows 14 bits, but above only 11
+-> make long format always with Auth Key, 3 bits 0b111 now avail for length,
+   and make middle chunks by taking bit from long options:
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |1 1 1 0 0 0|OptionDelta|     Option Length     | Option Data
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |1 1 1 0 0 1|      Chunk Length     |ChuType|B|E|S|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 1 0 1|        Chunk Length       |ChuType|Auth Key ID|B|E|S|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+swap them?.. use 0xf0 range?..
+two packet formats, short and long?..
+
+таки вынести Auth Key ID into STREAM_CONTROL ? then problem with non-delayed
+delivery before Cumulative TSN Ack
+put a bit flag? where? direclty or common packet flags?
+mb see what's for rekey in TLS? no, better in SSH
+still need Key ID because some bay be unauthed?
+
+TBD what if put Auth Key ID - not in first chunk, but in LAST ? as last byte
+- this would require buffering of all (probably 256 K) before start hashing
+- then as first byte of second chunk?
+
+TBD return to put chunks in their option to free some bits? 32 vs 23 is not very much saving
+
+giant chunks (0xC0..DF):
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 0|        Chunk Length       |ChuType|B|E|S| equal to option where A=0
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+TBD may be move this kostyl to fragments? middle options should be longer
+
+middle options (0xE0..EF):
+
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |1 1 1 0|Opt Delta|Option Length| Option Data
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+long options (0xF0..F7):
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |1 1 1 1 0|Option Delta |     Option Length     | Option Data
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+chunk option start with byte with Auth and other flag, and 4 bit key if has HMAC
+
+       0   1   2   3   4   5   6   7
+     +---+---+---+---+---+---+---+---+...
+     |   Chunk Type  |Aut|Beg|End|Spc| Data
+     +---+---+---+---+---+---+---+---+...
+
+       0   1   2   3   4   5   6   7
+     +---+---+---+---+---+---+---+---+...
+     |   Chunk Type  | 0 |Beg|End|Spc | Data
+     +---+---+---+---+---+---+---+---+...
+
+       0   1   2   3   4   5   6   7
+     +---+---+---+---+---+---+---+---+...
+     |   Chunk Type  | 1 |KeyId-1|Spc| Data
+     +---+---+---+---+---+---+---+---+...
+
+     ID Val/Mnemonic  Opt Chunk Type
+     -----            ----------
+     0       NUL ^@ - TIMESTAMP: Time @ Sender & Echo Time of Receiver
+     1       SOH ^A - TSN_HEADER: Flags and numbers of subsequent TSNs
+     2       STX ^B - FRAGMENTS: Recovery TSN after MTU fall
+     3       ETX ^C - 
+     4       EOT ^D - DATA: Internal streams and User Payload TSN Data
+     5       ENQ ^E - ECHO: Heartbeat Acknowledgement / State Cookie
+     6       ACK ^F - SACK: Selective Acknowledgement
+     7       BEL ^G - 
+     8       BS  ^H - HEARTBEAT: Heartbeat Request
+     9       HT  ^I - 
+     10 0x0a LF  ^J - COOKIE_ACK: Cookie Acknowledgement
+     11 0x0b VT  ^K - 
+     12 0x0c FF  ^L - LINK_INFO: Measured SRTT/RTTVAR/MTU/cwnd/etc. inform
+     13 0x0d CR  ^M - MORE_DATA: Server Has Bytes Available to Request
+     14 0x0e SO  ^N - ERROR:  Operation Error [Mnem: 0xe]
+     15 0x0f SI  ^O - SHUTDOWN: Shutdown [Mnem: FIN]
+     16 0x10 DLE ^P - SHUTDOWN_ACK: Shutdown Acknowledgement
+     17 0x11 XON ^Q -  [Mnem: MQTT ^QoS]
+     18 0x12 DC2 ^R - ABORT: Abort association [Mnem: ^Reset] 
+     19 0x13 XOF ^S - ECNE_CWR: Congestion Packet Vector
+     20 0x14 DC4 ^T - 
+     21 0x15 NAK ^U - NAK: compress/HMAC fail / stream window full
+     22 0x16 SYN ^V - Reserved
+     23 0x17 ETB ^W - Reserved
+     24 0x18 CAN ^X - CANCEL_TSN: Forward Cumulative and skip TSNs
+     25 0x19 EM  ^Y - SHUTDOWN_COMPLETE: Shutdown Complete
+     26 0x1a SUB ^Z - COMPRESSED_DATA: [Mnem: 26 for PPP Deflate]
+     27 0x1b ESC ^[ - Reserved
+     28 0x1c FS  ^\ - 
+     29 0x1d GS  ^] - Reserved
+     30 0x1e RS  ^^ - Reserved
+     31 0x1f US  ^_ - MTU_PROBE
+
 
 -- /variant 20
 
@@ -1209,6 +1327,10 @@ TBD FORWARD_TSN problem - skipped Partial Reliability blocks may have same TSN
   Verification Tag бэкендам РЕКОМЕНДОВАНО "компрессировать" битовым флагом,
   чтобы не передавать нули в пакете, и таким образом расширить MTU первого
   пакета (длину INIT-данных) еще на 3-4 байта.
+
+TODO 100000... for ABORT packet, and echo Tag of Sender as first bytes, or
+else in Host-to-Host (no ports) tunnel it would not be possible to match which
+association caused Reset
 
 2.5. Common used data types.
 
@@ -1283,10 +1405,11 @@ TBD вариант Хаффмана 1-байтным:
    11111111 - 32 G
 
 pyramint4:                             1000 1001 1010 1011 1100 1101 1110 1111  
-  0    1    2    3    4    5    6    7    8   16   32   64  128  256  512 1024
+  0    1    2    3    4    5    6    7    8   16   24   32   64  128  256  512
 
 TBD Pyramint9 for 2^45 perfectly matches max of 2^31 TSN * 16 Kb packet, has
 it enough granularity on low values to avoid SWS ?
+TBD is it really 2^45 ? recheck
 
 TBD и что-то не сходится
 
@@ -1301,6 +1424,7 @@ TBD и что-то не сходится
 
   Поскольку sockaddr_storage, согласно RFC 3493 ss_len
   как атом, то максимальная длина строки атома должна быть 128
+TBD - 128 SHOULD? MUST?
 
   Атомы делятся на классы,
 
@@ -1854,7 +1978,7 @@ TBD заменить Res/FracS на максимальную гранулярн�
   The flags from client:
   (note bits numbering from right)
 
-        2              |  2 1          |      1        |
+        2                |2 1            |    1      |
         9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
        |                   Reserved                    |C|Too|S|TEL|
@@ -1866,7 +1990,7 @@ TBD заменить Res/FracS на максимальную гранулярн�
   The flags from server:
   (note bits numbering from right)
 
-        2              |  2 1          |      1        |
+        2                |2 1            |    1      |
         9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
        |                   Reserved                    |A|QoS|S|TEL|
@@ -1897,6 +2021,47 @@ TBD proxy - e.g. for inspecting by firewalls, service request?
      over config stream translated by proxy, except proxy.* subtree
 
 -- /variant unfragmented
+
+   SCTP used a trick where server does not keep any state at all by packing
+   entire TCB info into cookie, resulting in more than a hundred bytes, which
+   is, of course, unacceptable for constrained environments. However, is such
+   need will arise in the future, some option for extending cookie may be used.
+
+  Format of ABORT packet:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |Ver|0|1|                          0                            |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |SRTLn|      Echo of Connection Verification Tag of Sender      |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /            Stateless Reset Token, 0..SRTLn bytes              /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /         CBOR indefinite-length array with Error Causes        /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /     Padding started with 0xFF, ignored, optional - if         /
+     \          underlying protocol requires so                      \
+     /                                                               /
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   The indefinite-length array terminating 0xFF byte is implicit: if no
+   Padding present, then receiver virtually appends this byte for CBOR parser,
+   if required by implementation; or with Padding the 0xFF byte will be 
+   explicitly present, then everything after it MUST be ignored by parser.
+
+   The difference between ABORT chunk and ABORT packet is that for ABORT
+   chunk, an association in ESTABLISHED state exists, so that sender of ABORT
+   chunk can properly fill it's own Connection Verification Tag and
+   encrypt/authenticate the packet, while for ABORT packet, association (and
+   state) does not exist, either because it's not yet created (case for error
+   in INIT packet) or other reason (e.g. sender mistaken address).
+
 
 3.3. Процедуры.
 
@@ -3339,7 +3504,7 @@ TODO
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|X|B|E| Block Len/Ofs |Strm ID| Stream Sequence Number|
+     |TSN Layer|X|B|E| Block Len/Ofs |Strm ID| Stream Sequence Number|
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |Strm ID| Stream Sequence Number| 
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...+-+-+-+-+-+-+-+-+-+-+-+-+...
@@ -3352,7 +3517,7 @@ TODO:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Delta|L|B|E|  Stream Sequence Number | FSN | Blk Len if E=0|
+     |TSN Layer|L|B|E|  Stream Sequence Number | FSN | Blk Len if E=0|
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      | Data...
      +-+-+-+...
@@ -4741,6 +4906,9 @@ limited to 16 Kb, and VarNibbles for header:
 TBD what to do if same TSN was retransmitted on two or more different paths,
 which packet to select for fragmentation?
 
+TBD if chunks returned to options and TSN again per chunk, then need
+Chunk Type and ABES... may be HMAC length if BE=11 ?
+
 -- /variant Packet 2
 
 4. NAK
@@ -5813,16 +5981,40 @@ ILP:
 TODO
 
 
-Appendix B. Example tunnel: UDP Size M.
+Appendix B. Example tunnel: UDP tunnels of size M and XXL.
 
-VerSize - для различения, что size M и какая его версия
+   All UDP tunnels has first 5 bits for Version and header Size - to
+   distinguish between type, to have space for future versions and to
+   indicate whether header compression was
 
-В установленном - обычный пакет:
+      0 1 2 3 4
+     +-+-+-+-+-+...
+     |VersnSize|
+     +-+-+-+-+-+...
+
+size XS:
 
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSize|0|OnP| Packet Counter  |FEC/W/L|T| tv_sec Low 11 bits  |
+     |VerSzXS|IWL|ServInstNum|ShKeyID|ErsatzMAC|FracS| tv_sec 8 bits |
+   4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |TSL|R|               Connection Verification Tag               |
+   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |Packet Counter |                                               /
+     +-+-+-+-+-+-+-+-+                                               \
+     /             Actual packet data, probably encrypted            /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+TBD space for crypto checksum
+
+UDP Size M in Established state (usual packet):
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |VerSizM|0|OnP| Packet Counter  |FEC/W/L|T| tv_sec Low 11 bits  |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSL|R|               Connection Verification Tag               |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -5875,7 +6067,7 @@ INIT/ACK-packet:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSize|1|lgMSS|tv_sec low 24 bits / Low 6 as Packet Counter Hi|
+     |VerSizM|1|lgMSS|tv_sec low 24 bits / Low 6 as Packet Counter Hi|
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSL|T23|K|PkCLo|                   Nonce,                      \
    8 +-+-+-+-+-+-+-+-+                 optional,                     /
@@ -5918,18 +6110,18 @@ lgMSS - limit MTU, safe MSS is:
 allows ~3 Gbit/sec = 8 * 2^10 bits tv_usec * 2^(9-1) bits Packet Counter * 1500 bytes Ethernet MTU
 
 
-size XXL - on 1280 MTU no need to separate INIT format:
+size XL - on 1280 MTU no need to separate INIT format:
  
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSize|ServInstNum|OnP|FEC/W/L|    Packet Counter, 16 bits    |
+     |VerSizeXL|OnP|Shared Key ID, 9 |    Packet Counter, 16 bits    |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSL|R|               Connection Verification Tag               |
+     |TSL|M|               Connection Verification Tag               |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |                     tv_sec, full 32 bits                      |
   12 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |     Shared Key ID     |           tv_usec, 20 bits            |    
+     |ServInstNum|FEC N/Wr/La|           tv_usec, 20 bits            |    
   16 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      .        Nonce, optional, present / defined by Key Algo         .
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -6383,6 +6575,20 @@ bytes?
  1010101a bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 41
  101011aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg          - 50
  1011aaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg hhhhhhhh - 60
+
+ 0..127
+ 100aaaaa bbbbbbbb                                     - 13
+ 1010aaaa bbbbbbbb cccccccc                                              - 20
+ 11aaaaaa bbbbbbbb cccccccc dddddddd                   - 30
+ 1011aaaa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 36
+
+ 0..127
+ 100aaaaa bbbbbbbb                                                       - 13
+ 10100aaa bbbbbbbb cccccccc                                              - 19
+ 11aaaaaa bbbbbbbb cccccccc dddddddd                   - 30
+ 10101aaa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 35
+ 10110aaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 43
+ 10111aaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg          - 51
 
 32:
 
