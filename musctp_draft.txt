@@ -70,6 +70,12 @@ also states about bad assumptions in the protocol design about performance const
 (read: variable-length fields)
 
 
+due to Unix Time is bad in long scale, Leap Seconds and other problems, this
+protocol version MUST NOT be used in XXII century (recommended method will be
+e.g. Juliand Days or CCSDS DAY SEGMENTED TIME CODE), so, for this version,
+tv_sec is simply limited to 32 bits (unsigned) and that's it.
+
+
 1.1. Общий обзор.
 
    Ranging protocols (boundaries really are somewhat blurred) by upper scale:
@@ -536,6 +542,9 @@ https://datatracker.ietf.org/doc/html/draft-trammell-plus-statefulness-04 :
    then reveals the stop token, which can be verified both by the far
    endpoint and devices on path which have cached the stop hash to be
    authentic. 
+
+HEARTBEAT MUST be at least twice per tv_sec bitwitdth interval - coz clock
+drift
 
   В случае относительно низкой скорости (в пакетах) передачи данных, на низких
   MTU используется компрессия Transmission Sequence Number (TSN) Base -
@@ -1255,18 +1264,18 @@ chunk option start with byte with Auth and other flag, and 4 bit key if has HMAC
      -----            ----------
      0       NUL ^@ - TIMESTAMP: Time @ Sender & Echo Time of Receiver
      1       SOH ^A - TSN_HEADER: Flags and numbers of subsequent TSNs
-     2       STX ^B - FRAGMENTS: Recovery TSN after MTU fall
-     3       ETX ^C - 
+     2       STX ^B - MORE_DATA: Server Has Bytes Available to Request
+     3       ETX ^C - ??? AUTH end?
      4       EOT ^D - DATA: Internal streams and User Payload TSN Data
      5       ENQ ^E - ECHO: Heartbeat Acknowledgement / State Cookie
      6       ACK ^F - SACK: Selective Acknowledgement
-     7       BEL ^G - 
+     7       BEL ^G - FRAGMENTS: Recovery TSN after MTU fall
      8       BS  ^H - HEARTBEAT: Heartbeat Request
      9       HT  ^I - 
      10 0x0a LF  ^J - COOKIE_ACK: Cookie Acknowledgement
      11 0x0b VT  ^K - 
      12 0x0c FF  ^L - LINK_INFO: Measured SRTT/RTTVAR/MTU/cwnd/etc. inform
-     13 0x0d CR  ^M - MORE_DATA: Server Has Bytes Available to Request
+     13 0x0d CR  ^M - 
      14 0x0e SO  ^N - ERROR:  Operation Error [Mnem: 0xe]
      15 0x0f SI  ^O - SHUTDOWN: Shutdown [Mnem: FIN]
      16 0x10 DLE ^P - SHUTDOWN_ACK: Shutdown Acknowledgement
@@ -1277,7 +1286,7 @@ chunk option start with byte with Auth and other flag, and 4 bit key if has HMAC
      21 0x15 NAK ^U - NAK: compress/HMAC fail / stream window full
      22 0x16 SYN ^V - Reserved
      23 0x17 ETB ^W - Reserved
-     24 0x18 CAN ^X - CANCEL_TSN: Forward Cumulative and skip TSNs
+     24 0x18 CAN ^X - CANCEL_TSN: Forward Cumulative Ack and skip TSNs
      25 0x19 EM  ^Y - SHUTDOWN_COMPLETE: Shutdown Complete
      26 0x1a SUB ^Z - COMPRESSED_DATA: [Mnem: 26 for PPP Deflate]
      27 0x1b ESC ^[ - Reserved
@@ -4910,6 +4919,79 @@ TBD if chunks returned to options and TSN again per chunk, then need
 Chunk Type and ABES... may be HMAC length if BE=11 ?
 
 -- /variant Packet 2
+
+-- variant Packet 3
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |FLA|Packet Length/Offset/ACK |Time 8-4 | Frag Stream Seq Number|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     | Data...
+     +-+-+-+-+...
+
+   Time 8-4 is low bits of tv_sec except four lowest bits, that is, it
+   MUST be same as bits 23-27 of tv_sec on diagram for Virtual Packet.
+   This is intended to be like Timestamp option in TCP to filter too old
+   fragments with the same Sequence Number.
+
+TBD do we need it? each fragment will have time of outer packet
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |0 0|      Packet Length      |Time 8-4 | Frag Stream Seq Number|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     | Data...
+     +-+-+-+-+...
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1|  Cumulative Offset ACK  | Time 8-4 and FSSN of your side  |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     | SACK as Bitmap ranges, optional
+     +-+-+-+-+...
+
+   Reassembled packet has the following format:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |                     tv_sec, full 32 bits                      |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |     Shared Key ID     |           tv_usec, 20 bits            |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |               Base Transmission Sequence Number               |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     | Virtual Packet Data, with usual options format...
+     +-+-+-+-+...
+
+   The Virtual Packet MUST NOT include any options or their variants which
+   could trigger any packet-level response, or be such response, e.g.
+   TIMESTAMP option of full packet timestamp or reply (Packet Counter),
+   having Packet State (ECN) Vector, etc. - because it does not belong to any
+   real "physical" link. Essentially that means that only options like DATA
+   chunks, AUTH options and redefining TIMESTAMP's for B-chunks are allowed,
+   and some others (like MORE_DATA).
+
+   Shared Key ID is taken from the same space as for A=1 TSN chunks, that is,
+   for "NULL" server address.
+
+   Fragment sender MUST NOT send more bytes for all in-flight fragments than
+   size of receiver's advertised Fragment Reassembly Buffer, which, in turn,
+   MUST be bigger by about 1/16 of maximum supported MSS (to have space for
+   timestamps and authentication options), e.g. 4380 for 4096 byte MSS.
+   To simplify implementation, there is no "window update", receiver buffer is
+   freed only by size of fully transfered fragment. For example, for
+   receiver's buffer 6 Kb in size sender can have three 2 Kb size fragments
+   in-flight, and transmission of fourth may be started only when one of these
+   three is fully acknowledged, freeing 2 Kb at once.
+
+TBD 4380 too much? is 1500 enough for standard 1440 MSS ?
+
+-- /variant Packet 3
+
 
 4. NAK
 
