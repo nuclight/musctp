@@ -1805,6 +1805,10 @@ TBD 3.2.2.3.7 Assigned Client Identifier ?
 TODO not only client, but server ID also, thus node_id ? and lexicographical
 order of this determines low bit in message ID
 
+TBD what about global node_id instead of bit?
+- seems no, time will be different in each session
+- or possible? TIMESTAMP variant for proxy already present
+
 3.2.5. INIT_PARAM_SESSION
 
 TODO что мы определяем как сессию? отличия от MQTT ?
@@ -2775,7 +2779,7 @@ or 2-bit Add as method number, default method 0 is low bits of stream num
      +---------------------------------------------------------------+
 
 B E F L
-1 1 1 0 - single chunk, first block  - chunkLength=NULL, user part of thisLength MUST multiple 1K
+1 1 1 0 - single chunk, first block  - chunkLength=NULL, user part of thisLength MUST multiple 1K? can ли be 14 bytes?
 1 1 1 1 - single chunk, single block - chunkLength=NULL, thisLength not needed
 1 0 1 0 - first chunk, first block   - chunkLength > 0,  user part of thisLength MUST multiple 1K
 1 0 1 1 - first chunk, single block  - chunkLength > 0,  thisLength not needed
@@ -2790,7 +2794,7 @@ middle block, beginning chunk:
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSN Layer|B|0|U|0|0|           Stream Sequence Number          |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |      Stream ID, VarInt15      | Length in 1K  |
+     |      Stream ID, VarInt15      |Offset,VarInt32| Length in 1K  |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      /                                                               \
      \                  User Data, at least 1 byte                   /
@@ -2804,7 +2808,7 @@ last block, beginning chunk:
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSN Layer|B|0|U|0|1|           Stream Sequence Number          |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |      Stream ID, VarInt15      |        Length, VarInt15       |
+     |      Stream ID, VarInt15      |Offset,VarInt32|Length,VarInt15|
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      /                                                               \
      \                  User Data, at least 1 byte                   /
@@ -4992,6 +4996,39 @@ TBD 4380 too much? is 1500 enough for standard 1440 MSS ?
 
 -- /variant Packet 3
 
+-- variant TSN: 111xxxxx for fragments in TSN Layer? again AUTH problem for BE=11
+
+-- variant recursive: Chunk Type Fragment, packet in message, SACK them all!
+
+-- variant Packet Counter to decrease Id/offset size?
+
++ no separate Ack, just common Packet State vector
++ no byte count logic, use "prev counter" for tree of descendants when probing MTU
+- no path independence...
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |0|    Virtual Packet Length    |        Shared Key ID          |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |     tv_sec minus      |           tv_usec, 20 bits            |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |               Base Transmission Sequence Number               |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     | Virtual Packet Data, with usual options format...
+     +-+-+-+-+...
+
+middle/last fragments:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1|L|PktCntrOffs| Fragment of Virtual Packet Data...
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+TBD Last+FragNumber to increase offset to 96 ? then minimal Packet Counter width question...
+
+-- /variant Packet Counter
 
 4. NAK
 
@@ -5018,6 +5055,7 @@ for very short packets, where 8-byte blocks needed, in addtition to GOST, the
 following crypto can be used: take a SipHash by negotiated key of fixed
 strings "A", "B", "C", ... and XOR it's outputs with plaintext - effectively
 a short stream cipher, however, NOT RECOMMENDED as it is not studied
+-> no, stream ciphers require HMAC or bytes could be blindly modified, only CBC may be here
 
 5.1. AUTH option
 
@@ -6051,11 +6089,6 @@ N=30..31 - Error, don't continue, 30=Timeout, 31=Too large
 
 ---
 для 32-байтного D на R в TSL; 8.3 штамп и 7 дельта (1 знак, 4 целое):
-ILP:
-00 - INIT
-01 - обычный
-10 - обычный + P
-11 - обычный + L
  
 
   TBD 
@@ -6088,6 +6121,28 @@ size XS:
      /             Actual packet data, probably encrypted            /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+IWL:
+00 - INIT
+01 - usual
+10 - usual + Wrap Packet Counter
+11 - usual + Last Indicator
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |VerSzXS|0 0|MSS|TSL|T23|K|PkCLo|tv_sec lo 16 bits / Low 5 PkCHi|
+   4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /         Actual INIT packet data, probably encrypted           /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+MSS - limit MTU, safe MSS is:
+0    - 24 bytes (33 bytes UDP payload)
+1    - 32 bytes
+2    - 48 bytes
+3    - 64 bytes
 
 TBD space for crypto checksum
 
@@ -6203,7 +6258,7 @@ size XL - on 1280 MTU no need to separate INIT format:
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |                     tv_sec, full 32 bits                      |
   12 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |ServInstNum|FEC N/Wr/La|           tv_usec, 20 bits            |    
+     |ServInstNum|FEC N/Wr/La|           tv_usec, 20 bits            |
   16 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      .        Nonce, optional, present / defined by Key Algo         .
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -6250,7 +6305,7 @@ timestamp в формате struct timeval (big endian, 4 на секунды и
 
 Dif - биты, которые обязательно должны быть разными от клиента и сервера,
 для отличия от случайного попадания в обычный пинг
-TODO Dif is not needed in non-INIT packets as Tags are different
+NOTE Dif is not needed in non-INIT packets as Tags are different
 
 Значения полей см. в описании UDP
 
@@ -6283,17 +6338,20 @@ TODO Dif is not needed in non-INIT packets as Tags are different
      \                                                               \
      /        MAC, optional, present / defined by Key Algo           /
      \                                                               \
-     /               +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     \               |ExtPadLen|D|F|P|S| Delta, UInt15, Milliseconds |
+     /                                               +-+-+-+-+-+-+-+-+
+     \                                               |PWrap|ExtPadLen|
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-  F - ExtPadLen MUST be > 1 and it's last byte is FEC Number+Adjust as in UDP
-      TBD may be unconditional, always last when > 0 ?
-  P - Packet Counter Odd (from server) / delta is for Odd (from client)
+from server:
+     /        MAC, optional, present / defined by Key Algo           /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     | Delta, Milliseconds, 0=Invalid|  Packet Counter   |W|ExtPadLen|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+  PWrap - in seconds
   S - Sign of Delta
   Server Time = Packet Stamp + Delta*(-1)^S, in both directions
-TODO PkCntWrap & Packet Counter from server, no Delta from client?
-PkCntWrap is not needed in black mode
 
   INIT/ACK:
       0                   1                   2                   3
@@ -6301,11 +6359,11 @@ PkCntWrap is not needed in black mode
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |     0/8       |       0       |          Checksum             |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |           Identifier          |Pkt Counter Hi |Pkt Counter Low|
+     |           Identifier          |        Packet Counter         |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     | tv_sec Hi byte|      'T'      |ExtPadlen| tv_sec Low 11 bits  |
+     | tv_sec Hi byte|      'T'      |      tv_sec Low 16 bits       |
   12 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |   tv_usec - must be 0 |T23|TSL|Fragment Cookie|K|D|G|L|FragOfs|
+     |   tv_usec - must be 0   |Fraction Secs|ExtPadlen|TSL|T23|K|Dif|
   16 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
      /  External Packet Padding to 64 bytes, ignored on receipt,     /
@@ -6322,19 +6380,6 @@ PkCntWrap is not needed in black mode
      /          MAC, optional, present / defined by Key Algo         /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-? type bit is in 5th byte so Connection Verification Tag must be repeated in
-? every fragment - for easy implementation of only one reasm buf per conn
-- not only for easy, but also val from server to prevent blind spoof DDoS
-  -> mutual, that server also returns client's cookie? 
-
-on each frag Pkt Counter Hi must be incremented!
-
-replay attacks? are low 9 bits enough?
-
-intent for such complex offsets are to limit max buf size for DoS attacks
-
-use variant 6
 
 TBD FEC Num 5 bits? what with PacketCounter from server for FEC
 - 0      - пакет не принадлежит FEC
@@ -6787,6 +6832,7 @@ just sender was quiet; this resembles same problem which FSN solves
    -> requires 5 more bits, this could be solved by 1 flag bit and putting it
       into low bits of PacketCounter when they are zero, and require to always
       reply by ECNE_CWR on such numbers 
+PkCntWrap is not needed in black mode
 
 seems that ECNE_CWR in this form is not needed - we already have SACK, so it
 is for stats to cwnd adjust - whether was ECN, dups, etc.
