@@ -423,6 +423,11 @@ RFC 3493
   собственно данные адреса, зависящие от его типа. В отличие от низкоуровневой
   struct sockaddr, в muSCTP в основном применяются более высокоуровневые типы.
 
+TBD CBOR for address #6.9426([ protocol_name: tstr / bstr, address: any, * params: any ])
+and UDP port 9426 for tunnel "UDP-Example"
+
+TBD better name than "tunnel" ?
+
 TODO описать дерево в атомах, где их номера
 
 2.3. Мини-протоколы инкапусуляции muSCTP.
@@ -1295,8 +1300,52 @@ chunk option start with byte with Auth and other flag, and 4 bit key if has HMAC
      30 0x1e RS  ^^ - Reserved
      31 0x1f US  ^_ - MTU_PROBE
 
+TBD TSN_HEADER - use just between-deltas instead of to-base deltas?
+0FFDDDDD - 2 bits flags, 5 delta? do we need local flags?
+1xxxxxxx - 7 bit global flags
 
 -- /variant 20
+
+-- variant 25
+
+google "65000 tcp connections" problem, so a variant instead of Stream ID...
+
+      0               
+      0 1 2 3 4 5 6 7 
+     +-+-+-+-+-+-+-+-+
+     |0|Intrn|A|B|E|S|
+     +-+-+-+-+-+-+-+-+
+
+      0                   1           
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 0| Deliv Obj, 10 bit |A|B|E|S|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+      0                   1                   2       
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 0|     Delivery Object, 17 bit     |A|B|E|S|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 1|             Delivery Object, 25 bit             |A|B|E|S|    
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+pros:
+- streams can be used whatever app needs, e.g. 1000000 channels and 10 ordered
+  messages and 20 unordered
+
+cons:
+- parser need to lookup object in table before know how to parse rest
+- how to create new Delivery Object?
+- reuse: if we delete Delivery Object slot, there are could be duplicate packets
+  to it in flight
+
+-- /variant 25
 
   Во время установления и завершения ассоциации фиксированный заголовок
   трактуется особенным образом, поэтому они рассмотрены в отдельных
@@ -2017,7 +2066,7 @@ TBD заменить Res/FracS на максимальную гранулярн�
      00 - none (timestamp field absent)
      01 - 1 high byte
      10 - 2 high bytes
-     11 - full 4 bytes
+     11 - full 4 bytes TBD or 3 ? do we require tunnels to provide 8 bits in INIT too?
    S - Synchronize:
      * from client: "I will use your time if it differs too much"
      * from server: "I have NTP synchronized clock"
@@ -2787,6 +2836,16 @@ B E F L
 userLength/offset are possible even in single block, e.g. continue small tail
 from previous sess
 
+TBD seems that offset is inevitable, but if reduce Stream ID to 10 bits, then
+with custom Offset format SID+Offset will expand 4 bytes max; same field
+would be used for TSN Offset (thus more than 32768 TSNs); also it fits nicely
+for Unordered middle chunks, as 2 bits for flags would unused otherwise (but
+TSN Offset still limited to 32768); also ideal for Message ID with stream
+number; the only sufferer is legacy Channel - reducing SSN to 19 bits
+
+TBD need to fix Parent in Window in STREAM_CONTROL for this? or just Arg15 can
+contain 10 bits and that's it?..
+
 middle block, beginning chunk:
 
       0                   1                   2                   3
@@ -3302,7 +3361,6 @@ TBD if CBOR (not CBAR) then 1 bit if GHC
 	 -> seems no, these have rules for increasing lenghts, but atom
             numbering is independent
 
-
 if BE=10, then VarUInt32:
 
         2              |  2 1          |      1        |
@@ -3347,6 +3405,14 @@ and also Tag 41
 
 TBD race conditions with atoms & other session - use RFC 5661 Section 2.10.6 ?
 -> no, ReleaseAtom message from both sides, like refcount/semaphore
+
+TBD for sublists with tree of streams, if array[index]=parent then compact?
+- no, we need ordering like "first substream" for e.g. EXTENDED_DATA_STDERR
+- make it also #6.40 for reply_to/reply_first/reply_next in 2nd Dimension?
+  - this means linked lists thus no gaps possible, so what to do when reparent
+    of stream in the middle? numbers for others will shift, is it ok?
+    TODO study again RFC 4254, SST and HTTP/2 priorities
+  - but is it needed? keeping array N*N streams is bad for constrained implementations
 
 TODO
 
@@ -3657,22 +3723,21 @@ TBD CBAR ?
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Layer|B|E|RemLength, if E=0|  tv_sec Subtract, VarUInt32   |
+     |TSN Layer|B|E|RemLength, if E=0|    Stream Sequence Number     |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |                    tv_sec Subtract, VarUInt32                 |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
      /                     Commands, VarSextets                      /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-   Note there is no Stream Sequence Number, to save space and to allow message
-   rates as high as per each TSN regardless of in-flight number, but this
-   means that receiver processes STREAM_CONTROL messages only when Cumulative
-   TSN Ack point is reached.
-
    The Remaining Length field, present if BE=10, uses S bit as high bit (if
    BE=11 then S bit MUST be ignored) and specifies length after first chunk:
    for example, Remaining Length equal to 511 in B-chunke with 256 bytes after
-   header means 768 byte message in total.
+   header means 768 byte message in total. If E is set, then bit S MUST be
+   ignored, that is, Stream Sequence Number is byte-aligned as usual and
+   started from bit 8 in such case.
 
    The tv_sec Subtract header field is subtracted from tv_sec part of timestamp
    of TSN chunk to get BaseTime value used in subsequent delta-coding of
@@ -3776,40 +3841,67 @@ TODO copy behaviour description here from MQTT 5.0 standard
 
    Explicit argument, named Arg26, is not always present, exact operation,
    including possible re-parent of stream, is defined by ArgType in the
-   folowing table (where "<< S" means "shift left by value of Shift field"):
+   folowing table (where "<< S" means "shift left by value of Shift field"
+   and "." means concatenation of bit strings):
 
-            | No reparent          | Set NULL             | Set
-   Window   | operation            | parent               | parent
-   ---------+----------------------+----------------------+---------------------
-   Set NULL | 0.                   | 1.                   | 2.
-            | window := NULL       | window := NULL       | window := NULL
-            |                      | parent := NULL       | parent := Arg15 << S
-   ---------+----------------------+----------------------+---------------------
-   Adjust,  | 3.                   | 4.                   | 5.
-   short    | window += Arg15 << S | window += Arg15 << S | Reserved
-   argument |                      | parent := NULL       | 
-   ----------+----------------------+----------------------+---------------------
-   Adjust,  | 6.                   | 7.                   | 8.
-   long     | window += Arg26 << S | window += Arg26 << S | window := Arg26 << S
-   argument |                      | parent := NULL       | parent := Arg15
-   ----------+----------------------+----------------------+---------------------
-   Set,     | 9.                   | 10.                  | 11.
-   short    | window := Arg15 << S | window := Arg15 << S | Reserved
-   argument |                      | parent := NULL       | 
-   ---------+----------------------+----------------------+---------------------
-   Set,     | 12.                  | 13.                  | 14.
-   long     | window := Arg26 << S | window := Arg26 << S | window := Arg26 << S
-   argument |                      | parent := NULL       | parent := Arg15
-   ---------+----------------------+----------------------+---------------------
+         | No reparent        | Set NULL         | Set
+Window   | operation          | parent           | parent
+---------+--------------------+------------------+--------------------------
+Set NULL | 0.                 | 1.               | 2.
+         | window := NULL     | window := NULL   | window := NULL
+         |                    | parent := NULL   | parent := H(Arg15, Shift)
+         |                    | weight := Shift  | weight := Arg15 >> 12
+---------+--------------------+------------------+--------------------------
+Adjust,  | 3.                 | 4.               | 5.
+short    | window += Arg15    | window += Arg15  | Reserved
+argument |           << Shift | parent := NULL   | 
+         |                    | weight := Shift  |
+---------+--------------------+------------------+--------------------------
+Adjust,  | 6.                 | 7.               | 8.
+long     | window += Arg15    | window += Arg26  | window := Arg26
+argument |         . Shift    | parent := NULL   | parent := H(Arg15, Shift)
+         |         . Arg26    | weight := Shift  | weight := Arg15 >> 12
+---------+--------------------+------------------+--------------------------
+Set,     | 9.                 | 10.              | 11.
+short    | window := Arg15    | window := Arg15  | Reserved
+argument |           << Shift | parent := NULL   | 
+         |                    | weight := Shift  |
+---------+--------------------+------------------+--------------------------
+Set,     | 12.                | 13.              | 14.
+long     | window := Arg15    | window := Arg26  | window := Arg26
+argument |         . Shift    | parent := NULL   | parent := H(Arg15, Shift)
+         |         . Arg26    | weight := Shift  | weight := Arg15 >> 12
+---------+--------------------+------------------+--------------------------
+
+TBD push/unshift bit for reparent & excl in Shift? weights in Hi 5 of Arg15 ? 
+|    An exclusive flag allows for the insertion of a new level of
+|    dependencies.  The exclusive flag causes the stream to become the
+|    sole dependency of its parent stream, causing other dependencies to
+|    become dependent on the exclusive stream.  In the previous example,
+|    if stream D is created with an exclusive dependency on stream A, this
+|    results in D becoming the dependency parent of B and C.
+| Belshe, et al.               Standards Track                   [Page 25]
+| 
+| RFC 7540                         HTTP/2                         May 2015
+|                          A
+|        A                 |
+|       / \      ==>       D
+|      B   C              / \
+|                        B   C
+
+TBD so scarce bits, may be split to several commands?
 
    That is, values 5, 11 and 15 of ArgType are reserved and MUST be treated
    as error. Argument (Arg26) is present only if ArgType is 6, 7, 8, 12, 13
    or 14.
 
-   Note that maximum Shift value is 7, which allows 33-bit values. As 32-bit
-   implementations have to keep their window as signed value, sender MUST put
-   such values that, after calculations, window will not exceed 2^31-1 bytes,
-   unless an extension was negotiated at INIT stage.
+   Note that maximum possible values for window can be up to 44 bits wide 
+   (Arg15 as most siginficant bits, then 3 bits of Shift field (losing it's
+   shift meaning), then Arg26 as least significant bits) with long argument
+   without reparent operation. As 32-bit implementations have to keep their
+   window as signed value, sender MUST put such values that, after
+   calculations, window will not exceed 2^31-1 bytes, unless an extension
+   was negotiated at INIT stage.
 
    Finally, SKIP_BLOCKS command is used to report to receiver that particular
    Stream Sequence Numbers of DATA chunks are abandoned, either by Partial
@@ -4080,6 +4172,8 @@ RFC 7141:
     * 110 - по 64 байта, диапазон 2048 - 32 значения от 2304 по 4288
     * 111 - по 128 байт, диапазон 4096 - 32 значения от 4352 по 8320
 
+perl -E 'for($j=0;$j<=31;$j++){printf "%4d:",$j}printf"\n";$v=256;for($i=2;$i<=7;$i++){printf"$i:";for($j=0;$j<=31;$j++){printf "%4d ",$v;$v+=2**($i+1)}printf"\n"}'
+
       0:   1: ... 4: ...   8: ...  12:   13: ... 16: ... 30:    31:
   2:  256  264 .  288 .   320  .   352   360 .   384 .   496    504
   3:  512  528 .  576 .   640  .   704   720 .   768 .   992   1008
@@ -4093,6 +4187,7 @@ TODO миним MSS=24 и без Connection Tag - 1+13 данные, 1 TSN Base,
 TBD сколько, по сколько и от скольки? 8 по 32 точно один из них
 128+256+512+1024+2048+4096+8192=16256 а куда столько? TBD en.wikipedia/Minifloat
 TODO еще же добавление до гранулярности
+
 
 4.10. MORE_DATA: Server Has Bytes Available to Request
 
@@ -4589,6 +4684,10 @@ TBD изменить формат, раз на диоде формат нече�
 TBD or: just a count (0-3) for each codepoint? but how FEC then?
 if 0/1/2=2 or more, then 3^4=81, 81*3=243 and 13 reserved values!
 
+TBD drop codes 8-11 for extension - time/PacketCounter, instead of PkCntWrap?
+- how to encode both values under 30 bits? or extend TIMESTAMP reply with next
+  time/PacketCounter pair?
+
 
 4.20. FRAGMENT.
 
@@ -5009,9 +5108,9 @@ TBD 4380 too much? is 1500 enough for standard 1440 MSS ?
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |0|    Virtual Packet Length    |        Shared Key ID          |
+     |0|    Virtual Packet Length    |     tv_sec delta, int16       |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |     tv_sec minus      |           tv_usec, 20 bits            |
+     |     Shared Key ID     |           tv_usec, 20 bits            |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |               Base Transmission Sequence Number               |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -5027,6 +5126,12 @@ middle/last fragments:
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
 
 TBD Last+FragNumber to increase offset to 96 ? then minimal Packet Counter width question...
+
+   When chain of fragments is successfully traversed from last to first,
+   receivers frees all buffered FRAGMENT options of packets with Packet
+   Counter from first to last.
+
+TBD what if last succesfull was not last try, how to free those after last?
 
 -- /variant Packet Counter
 
@@ -6107,6 +6212,13 @@ Appendix B. Example tunnel: UDP tunnels of size M and XXL.
      |VersnSize|
      +-+-+-+-+-+...
 
+   As changes to bit widths of fields during active link are not allowed
+   (e.g. Packet Counter could wrap at wrong point), tunnels MUST silently
+   ignore packets with known Connection Verification Tag, but incorrect
+   Version/Size field, if several Version/Size are implemented on a single
+   listening UDP port.
+
+
 size XS:
 
       0                   1                   2                   3
@@ -6274,6 +6386,32 @@ size XL - on 1280 MTU no need to separate INIT format:
 this is exactly 1440 byte MSS on IPv4: 1472 UDP - 16 header - 16 HMAC,
 with header used as nonce
 
+size XXL - for MTU >= 1500:
+ 
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |VerSizXXL|OnP|L|Packet Counter Wrap|FEC Number |   Reserved    |
+   4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |TSL|M|               Connection Verification Tag               |
+   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |                     tv_sec, full 32 bits                      |
+  12 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     | Shared Key ID, 12 bits|           tv_usec, 20 bits            |
+  16 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |ServInstNum|             Packet Counter, 26 bits               |
+  20 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     .        Nonce, optional, present / defined by Key Algo         .
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /                    Actual INIT packet data                    /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     \                                                               \
+     /         HMAC, optional, present / defined by Key Algo         /
+     \                                                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
 
 TODO
 
@@ -6350,6 +6488,7 @@ from server:
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
   PWrap - in seconds
+TBD
   S - Sign of Delta
   Server Time = Packet Stamp + Delta*(-1)^S, in both directions
 
