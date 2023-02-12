@@ -427,6 +427,7 @@ TBD CBOR for address #6.9426([ protocol_name: tstr / bstr, address: any, * param
 and UDP port 9426 for tunnel "UDP-Example"
 
 TBD better name than "tunnel" ?
+- "bearer" from TIPC ? "carrier" ?
 
 TODO описать дерево в атомах, где их номера
 
@@ -884,6 +885,9 @@ RFC 1323:
               24.8 days or longer can probably be assumed by the gateway
               system without requiring precise MSL enforcement by the
               TTL value in the IP layer.
+TBD 
+   other uses of the Timestamps option, such as the Eifel mechanism
+   ([RFC3522], [RFC4015])
 
 TODO
 
@@ -1305,6 +1309,10 @@ TBD TSN_HEADER - use just between-deltas instead of to-base deltas?
 1xxxxxxx - 7 bit global flags
 
 -- /variant 20
+
+TBD with ABES, still has header checking problem: dispatch result like
+"length/PPID" should be presented to user as early as possible (for decision),
+but HMAC will be at end of entire block, needing to buffer or blindly trust...
 
 -- variant 25
 
@@ -2815,23 +2823,6 @@ no, let's think TSN layer provides us with full 20 bits, so Add to full msgid
 have to be at most 10 bit.. may be shifted?
 or 2-bit Add as method number, default method 0 is low bits of stream num
 
-      0                   1                   2                   3
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Layer|B|E|U|F|L|           Stream Sequence Number          |
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |      Stream ID, VarInt15      | Flags-dependent length fields .
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     /                                                               \
-     \         Control and/or User Data, at least 1 byte             /
-     /                                                               \
-     +---------------------------------------------------------------+
-
-B E F L
-1 1 1 0 - single chunk, first block  - chunkLength=NULL, user part of thisLength MUST multiple 1K? can ли be 14 bytes?
-1 1 1 1 - single chunk, single block - chunkLength=NULL, thisLength not needed
-1 0 1 0 - first chunk, first block   - chunkLength > 0,  user part of thisLength MUST multiple 1K
-1 0 1 1 - first chunk, single block  - chunkLength > 0,  thisLength not needed
 
 userLength/offset are possible even in single block, e.g. continue small tail
 from previous sess
@@ -2846,6 +2837,66 @@ number; the only sufferer is legacy Channel - reducing SSN to 19 bits
 TBD need to fix Parent in Window in STREAM_CONTROL for this? or just Arg15 can
 contain 10 bits and that's it?..
 
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |TSN Layer|B|E|U|F|L|           Stream Sequence Number          |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |     Stream ID     |     Offset, 1/2/3 bytes (20 bits max)     |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |  User Data Left Length, VarUInt32  /  Block Length, VarInt15  |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     | Control/Length|UserPart Len 1K|                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               /
+     /                                                               \
+     \         Control and/or User Data, at least 1 byte             /
+     /                                                               \
+     +---------------------------------------------------------------+
+- and 4 bytes (20 bits) for TIMESTAMP when retransmission / no Packet Cache
+TBD seems 20 bits not enough, put in Control Data? but would not be _same_
+chunk for AUTH...
+
+TBD have implicit Immediate_SACK on BE=10 on size < 20 bytes as no space for TSN_HEADER
+TBD every or just L=0 and non-zero Offset?
+
+TBD Total Length, or Remaining Length? same size on > ~8 Mb though
+
+ B E F L | Meaning      | Control | User Part | User Left | Block Length
+=========+==============+=========+===========+===========+====================
+ 1 0 1 0 | first chunk  | Byte    | Byte, in  | VarUInt32 | Implied:
+         | first block  |         | 1K units  |           | Control + User Part
+---------+--------------+---------+-----------+-----------+--------------------
+ 1 0 1 1 | first chunk  | Byte    | None      | None      | VarInt15 
+         | single block |         |           |           |
+---------+--------------+---------+-----------+-----------+--------------------
+ 1 1 1 0 | single chunk | Byte    | Implied,  | VarUInt32 | None (known by
+         | first block  |         | MUST be   |           | option length)
+         |              |         | N * 1024  |           |
+---------+--------------+---------+-----------+-----------+--------------------
+ 1 1 1 1 | single chunk | Byte    | None      | None      | None (known by
+         | single block |         |           |           | option length)
+---------+--------------+---------+-----------+-----------+--------------------
+ 1 0 0 0 | first chunk  | None    | Byte, in  | None      | Implied:
+         | middle block |         | 1K units  |           | User Part
+---------+--------------+---------+-----------+-----------+--------------------
+ 1 0 0 1 | first chunk  | None    | None      | None      | VarInt15
+         | last block   |         |           |           |
+---------+--------------+---------+-----------+-----------+--------------------
+ 1 1 0 0 | single chunk | None    | Implied,  | None      | None (known by
+         | middle block |         | MUST be   |           | option length)
+         |              |         | N * 1024  |           |
+         |              |         | (N > 0)   |           |
+---------+--------------+---------+-----------+-----------+--------------------
+ 1 1 0 1 | single chunk | None    | None      | None      | None (known by
+         | last block   |         |           |           | option length)
+---------+--------------+---------+-----------+-----------+--------------------
+
+   NOTE that User Part can be zero, meaning no user data in this chunk (thus
+   maximum size is 255K = 261120 bytes), for low MTU when tunnel does not have
+   HMAC - so having HMAC by TSN layer at end of block would mean delaying
+   delivery control data to dispatcher until all user part received (may be
+   just to find that it should thrown away).
+
 middle block, beginning chunk:
 
       0                   1                   2                   3
@@ -2853,8 +2904,10 @@ middle block, beginning chunk:
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSN Layer|B|0|U|0|0|           Stream Sequence Number          |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |      Stream ID, VarInt15      |Offset,VarInt32| Length in 1K  |
+     |     Stream ID     |     Offset, 1/2/3 bytes (20 bits max)     |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |UserPart Len 1K|                                               \
+     +-+-+-+-+-+-+-+-+                                               /
      /                                                               \
      \                  User Data, at least 1 byte                   /
      /                                                               \
@@ -2867,8 +2920,10 @@ last block, beginning chunk:
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSN Layer|B|0|U|0|1|           Stream Sequence Number          |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |      Stream ID, VarInt15      |Offset,VarInt32|Length,VarInt15|
+     |     Stream ID     |     Offset, 1/2/3 bytes (20 bits max)     |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |    Block Length, VarInt15     |                               \
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               /
      /                                                               \
      \                  User Data, at least 1 byte                   /
      /                                                               \
@@ -3911,7 +3966,7 @@ TBD so scarce bits, may be split to several commands?
         2         2 1                 1         
         5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |  N (number of arguments minus one)  |ChT/U|Command|
+       | N (number of arguments minus one) |ChTyp/U|Command|
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
        |   Stream Sequence Number of first skipped block   |
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -3929,8 +3984,8 @@ TBD so scarce bits, may be split to several commands?
    The ChunkType/U field is mainly for future extensibility, only two
    values are defined now, all other MUST be treated as error:
 
-   000 - chunk USER_MESSAGE, Ordered
-   001 - chunk USER_MESSAGE, Unordered
+   0000 - chunk USER_MESSAGE, Ordered
+   0001 - chunk USER_MESSAGE, Unordered
 
    Then N field gives how many arguments are taken, after mandatory argument,
    which equals to Stream Sequence Number of first skipped block in this
@@ -4055,6 +4110,9 @@ no need for "RTT spin bit" of QUIC - LINK_INFO could be just put under Shared Ke
 
 CCVal not needed? RFC 3448
 
+TBD cwnd as VarOffset?
+TBD extensions as VarSextets or CBOR ?
+
     * RTTsh - сдвиг SRTT
     * H - in Half seconds ?? TBD
 
@@ -4075,6 +4133,16 @@ CCVal not needed? RFC 3448
    Задает оно значение дроби SRTT / RTTVAR. Если оно получается слишком малым
    для представления в 6 битах, т.е. передается 0, то в поле SRTT передается
    итоговое значение RTT, во всех остальных случаях SRTT.
+
+TBD unify with Pfloat7 ?
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |ShftS|    SRTT's mantissa      | Flags |RTTVAR frac|cwnd, Ofset| 
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |MSS (optional) | CCval, VarUInt32 (opt)  | Extensions (optional)
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...+-+-+-+-+-+-+...
 
 TODO BOOL semi-reliable transport, BYTE it's RTT add value
 

@@ -46,11 +46,11 @@ Encryption and message authentication are done in per-packet (IPsec) style, beca
 
 Despite of such hard constraints, muSCTP offers less than in SCTP but still reasonable limits to user application:
 
-* up to 256 concurrent structured streams of ordered messages, up to 1 Gb each (HoL is per stream)
-* up to 256 concurrent structured streams of unordered ("urgent") messages, up to 64 Kb each (HoL is per message)
-* up to 256 concurrent unstructured byte streams (HoL is per stream), each is like one TCP connection or QUIC stream
+* up to 1024 concurrent structured streams of ordered messages, up to 1 Gb each (HoL is per stream)
+* up to 1024 concurrent structured streams of unordered ("urgent") messages, up to (depending on priority) 64 Kb - 512 Mb each (HoL is per message)
+* up to 1024 concurrent unstructured byte streams (HoL is per stream), each is like one TCP connection or QUIC stream
 
-Given that typical browser does not make more than several dozens HTTP/1.1 connections concurrently (i.e. at the same time), this limis are quite enough not only for IoT but also for "unconstrained" Internet's today end-user applications.
+Given that typical browser does not make more than several dozens HTTP/1.1 connections concurrently (i.e. at the same time), and that default maximum for simultaneous QUIC streams in nginx is 128, these limits are quite enough not only for IoT but also for "unconstrained" Internet's today end-user applications.
 
 And major advantage or muSCTP over QUIC is **multipath** - ability not to just NAT rebinding when client's address changes, but parallel work over different addresses and even protocols (e.g. a mobile client utilizing both Wi-Fi and EDGE at the same time)!
 
