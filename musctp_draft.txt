@@ -513,6 +513,13 @@ TODO
     * Transmission Sequence Number (TSN) Base - базовое значение TSN для
       дальнейших опций.
 
+protocol is built so that - except optional cryptographic part - only 32-bit
+arithmetics is required from underlying hardware, and, in some cases, 64-bit
+values in only logical/masking operations, effectively on subfileds, so that
+e.g. 64 bits split into 29 bits of first Connection Tag, then 6 bits of Server
+Instance Number, then 29 bits of second Connection Tag - could be parsed by
+processing two 32-bit words
+
   Поле TSN имеет то же значение, что и в SCTP - номер блока данных при передаче
   данных с подтверждением, имеет полный "виртуальный" размер 32 бита, и
   подчиняется тем же правилам арифметики по модулю 32, что и в TCP и в SCTP.
@@ -1224,6 +1231,11 @@ TBD what if put Auth Key ID - not in first chunk, but in LAST ? as last byte
 - this would require buffering of all (probably 256 K) before start hashing
 - then as first byte of second chunk?
 
+TBD why Auth in every chunk? could be global for packet, as Immediate_SACK
+- because some may be un-authed as requested by user
+
+TBD inherit key for A bit also from Shared Key ID, as in AUTH opt ?
+
 TBD return to put chunks in their option to free some bits? 32 vs 23 is not very much saving
 
 giant chunks (0xC0..DF):
@@ -1308,6 +1320,36 @@ TBD TSN_HEADER - use just between-deltas instead of to-base deltas?
 0FFDDDDD - 2 bits flags, 5 delta? do we need local flags?
 1xxxxxxx - 7 bit global flags
 
+   There is low number of options, and timestamp could be before each
+   TSN chunk, so abandon option delta at all:
+
+short options (0x00..BF):
+
+      0
+      0 1 2 3 4 5 6 7
+     +-+-+-+-+-+-+-+-+...
+     |Length<23|Opt<8| Option Data
+     +-+-+-+-+-+-+-+-+...
+
+middle options (0xC0..DF):
+
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |1 1 0|Option<32| Option Length | Option Data
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+long options (0xE0..EF):
+
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+     |1 1 1 0| Option Number |     Option Length     | Option Data
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+for compressed, make it always authenticated? to check correctness
+
+
 -- /variant 20
 
 TBD with ABES, still has header checking problem: dispatch result like
@@ -1349,7 +1391,7 @@ pros:
 
 cons:
 - parser need to lookup object in table before know how to parse rest
-- how to create new Delivery Object?
+- how to create new Delivery Object? require confirmation thus 1+ RTT ?
 - reuse: if we delete Delivery Object slot, there are could be duplicate packets
   to it in flight
 
@@ -2607,7 +2649,7 @@ increment common key id in each negotiation? next_slot?
      /                                                               \
      +---------------------------------------------------------------+
 
-  Начало - стандартное для всех TSN chunks, с TSN Delta и битами B/E. Для
+  Начало - стандартное для всех TSN chunks, с TSN Layer и битами B/E. Для
   пользовательских данных поле Block Length/Offset может иметь длину от 6 бит
   до 30 бит, т.е. от 1 до 4 байт - количество байт продолжения задается
   битами BLL, только сам байт (6 бит) в случае нуля, еще 1 байт (6+8=14 бит)
@@ -2837,6 +2879,9 @@ number; the only sufferer is legacy Channel - reducing SSN to 19 bits
 TBD need to fix Parent in Window in STREAM_CONTROL for this? or just Arg15 can
 contain 10 bits and that's it?..
 
+TBD have implicit Immediate_SACK on BE=10 on size < 20 bytes as no space for TSN_HEADER
+TBD every or just L=0 and non-zero Offset?
+
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -2856,9 +2901,6 @@ contain 10 bits and that's it?..
 TBD seems 20 bits not enough, put in Control Data? but would not be _same_
 chunk for AUTH...
 
-TBD have implicit Immediate_SACK on BE=10 on size < 20 bytes as no space for TSN_HEADER
-TBD every or just L=0 and non-zero Offset?
-
 TBD Total Length, or Remaining Length? same size on > ~8 Mb though
 
  B E F L | Meaning      | Control | User Part | User Left | Block Length
@@ -2877,7 +2919,10 @@ TBD Total Length, or Remaining Length? same size on > ~8 Mb though
          | single block |         |           |           | option length)
 ---------+--------------+---------+-----------+-----------+--------------------
  1 0 0 0 | first chunk  | None    | Byte, in  | None      | Implied:
-         | middle block |         | 1K units  |           | User Part
+         | middle block |         | 1K units, |           | User Part
+         |              |         | MUST be   |           |
+         |              |         | N * 1024  |           |
+         |              |         | (N > 0)   |           |
 ---------+--------------+---------+-----------+-----------+--------------------
  1 0 0 1 | first chunk  | None    | None      | None      | VarInt15
          | last block   |         |           |           |
@@ -2896,6 +2941,21 @@ TBD Total Length, or Remaining Length? same size on > ~8 Mb though
    HMAC - so having HMAC by TSN layer at end of block would mean delaying
    delivery control data to dispatcher until all user part received (may be
    just to find that it should thrown away).
+
+   NOTE that "single chunk, first block" case on very low MTU would have not
+   enough space for TIMESTAMP option on retransmit if all length fields are at
+   their maximum (e.g. 8 Mb left of 16 Mb message from previous incarnation),
+   but Control Data is 0 or 1 bytes in length - forcing either single chunk or
+   putting at least 1K of User Data. On 24-byte MSS with AUTH option, it is
+   enough space for AUTH of single chunk, but if TSN Base is full 4 bytes,
+   then retransmit without Packet Cache would fail to transfer correct
+   Message ID. Implementations MUST ensure this case could never happen, and
+   here is how: observe that if Offset in first block is non-zero, then this
+   is a DUP of message from earlier association, and thus either:
+   1) a Full TIMESTAMP option present before this chunk (big enough MSS), or:
+   2) Control Data is in CBAR form bearing Message ID, so it has enough length
+      to be split into "first chunk, first block" form.
+TBD if 1 byte Control Data & Offset=0, still 13 bytes > 11 so what? put 1K user?
 
 middle block, beginning chunk:
 
@@ -2996,7 +3056,7 @@ TBD а что с разрывами? атомы тоже QoS'ить надо?..
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Layer|1|E|0| SeqNum  | Msg |L|Length if E=0| Len ext. if L |
+     |TSN Layer|1|E|0| SeqNum  | Msg |        Header VarInt          |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      | Data...
      +-+-+-+...
@@ -3004,26 +3064,22 @@ TBD а что с разрывами? атомы тоже QoS'ить надо?..
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSN Layer|1|E|1| SeqNum  | Reply/Err |RepSeqNum|L|Length if E=0|
+     |TSN Layer|1|E|1| SeqNum  | Reply/Err |RepSeqNum| Header VarInt |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     | Len ext. if L | Data ...
-     +-+-+-+-+-+-+-+-+-+-+-+...
+     | Data...
+     +-+-+-+...
 
       0                   1
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
-     |TSN Layer|0|E|S|  SeqNum | FSN |  Data...
+     |TSN Layer|0|E|    TSN Offset   |  Data...
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
 
-TODO если вводить FSN и поднять (здесь) SeqNum до 6 бит (здесь старший FSN в
-продолжениях будет в S), то L на T=формат, при T=1 ответ, если 3 бита Op, то
-длина 16 или 32 K - не делать L, добавлять байт по биту E ?
-или SeqNum 5 бит? на 6 алгоритм врапа не потребуется такой сложный
 
    0 - I_HAVE
    1 - C: InternAtom | S: Atom_Created TBD just set branch atom.0 as req?
-   2 - GetAtomName TBD just req branch atom.<hibyte>.<lobyte> instead ?
-   3 - C: DeleteAtom | S: Atom_Deleted
+   2 - GetAtomName
+   3 - ReleaseAtom
    4 - Get_Value - yours only
    5 - Set_Value - yours? both?
    6 - Value_Changed
@@ -3033,12 +3089,26 @@ TODO если вводить FSN и поднять (здесь) SeqNum до 6 б
    9 - ERROR
   10..15 - Reserved
 
-TBD если переделать создание атомов на set специального значение, то при 256
-же atoms.0 будет нодой, а не leaf, что делать?
--> просто в atoms.0.0 ? или atoms.64 (т.к. 2^14 старшие 0-63) и atoms.65
-можно для I_HAVE bulk
-TBD или даже вообще корень дерева, сэкономим байт
-тогда можно 2 бита на команду всего и 4 на reply code
+Header VarInt32:
+
+        2                |2 1            |    1      |
+        9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       |            Length, valid if E=0             |C|Septinovile|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+  C - CRC24 present, add 3 to Length
+  Septinovile - if not NULL, prepend CBOR Tag 40 with dimensions
+
+   This format allows for messages of up to 8 Mb in length, which is intended
+   mainly for ability to store compression dicitionaries. That is, 32-bit
+   implementations MUST support leaf value bytestrings of 32768 bytes in
+   length (maximum Deflate dictionary size) and 64-bit implementations MUST
+   support leaf value bytestrings of 112640 bytes in length (default zstd
+   dictionary size), plus other row columns overhead (depending on negotiated
+   tree depth). Following SSH tradition, maximum size in 32-bit case is
+   arbitrarily defined to be 34000 bytes, so maxumum row overhead fits in one
+   1280-byte MTU packet.
 
   I_HAVE - байтовые строки с именами атомов как фич
 
@@ -3048,139 +3118,11 @@ TBD или даже вообще корень дерева, сэкономим �
      |C|   Length    | Value of length + 1 bytes
      +-+-+-+-+-+-+-+-+-...
 
-   если C, присутствует дополнительный байт с классами после:
-
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+-...
-     |CLL| Classes, Huffman concatenated
-     +-+-+-+-+-+-+-+-+-...
-
-   где CLL указывает, сколько еще байт после этого (для простоты внешнего
-   парсера), т.е. для сконкатенированных значений классов доступно от 6 до 30
-   бит, терминируемых границей или стоп-кодом.
-
-   В случае клиента, C - это запрос создать в соответствующих классах,
-   в случае сервера - строка уже является созданным атомом в перечисленных
-   классах.
-
-   Для InternAtom существует проблема: номеров последовательности отведено
-   всего 16, и поэтому ссылки на SeqNum могут быстро закончиться. Поэтому в
-   имплементации заводится массив [0..15] на сообщения I_HAVE, первоначально
-   инциализированный во все NULL, и каждое сообщение I_HAVE перетирает запись
-   в этом массиве со своим SeqNum (предыдущее, если оно там было,
-   освобождается). Кроме того, создается вспомогательный массив wrap-счетчиков
-   для каждого из SeqNum, инкрементируемый при получении сообщения с SeqNum
-   одного из уже имеющихся запомненных I_HAVE, но имеющего другой тип. При
-   превышении счетчиком порога - происходит освобождение старого I_HAVE.
-   Имплементации ДОЛЖНЫ хранить не менее одного wrap и МОГУТ освобождать,
-   начиная со второго (т.е. иметь однобитный счетчик и освобождать при сбросе
-   его в 0), и ДОЛЖНЫ производить окончательное "забывание" при достижении
-   счетчиком 255.
-
-   InternAtom 
-
-      0                   1                   2                   3
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-...
-     |C|Src| Class     |StrNum or Len| SeqNum of N or| direct name
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-...
-
    C - Create / only-if-exists: BOOL
-   Src: Where String Name is found:
-      00 = Length in second byte, bytes 3-end - name itself
-      01 = in client's I_HAVE strings
-      10 = in server's I_HAVE strings
-      11 = Reserved
-  if Src is 1 or 2 then Len is 3 bytes and last byte is Seq Num of previous
-  I_HAVE strings message from client or server
-
-TBD мож поменять местами? 7 бит на Seq, 8 на номер строки.. или 4+11 (11=atommax)
-
-   Atom_Created
-
-      0                   1                   2                   3
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |Res|Src| Class : ... : Value   |R| SeqNum| StrNum Src's I_HAVE |
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-      0                   1                   2
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
-     |Res|Src| Class : ... : Value   |   Data ...
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
-
-
 GetAtomName - 2 bytes = CBAR Atom ??? multiple?
 
-TBD DeleteAtom для удаления адресов видимо надо
-в нём удаление и по номеру, и по имени, чтоб несекурные методы сразу, на
-удаление несуществующих давать ОК
-
-   GetAtomValue
-
-      0                   1                   2                   3
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |R|APath| Class : ... : Value   | Array Indexes, optional ...   |
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-     APath - how many 2-byte indexes in nested array follows, 0 = top
-
-     on non-zero APath result is always converted to CBAR type - e.g. if it
-     was index into sint24 array, not 3 bytes but Major Type 1.0 Signed Int is
-     returned
-
-   SetAtomValue
-
-      0                   1                   2                   3
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |B|APath| Class : ... : Value   | Array Indexes, optional ...   |
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     | New Value's Data...
-     +-+-+-+...
-
-     B - Both
-     APath - how many 2-byte indexes in nested array follows, 0 = top
-     on non-zero APath new value must alway be CBAR type - e.g. if it
-     was index into sint24 array, still not 3 bytes but Major Type 1.0
-     Signed Int is input and ERROR will be returned if it not fits into
-     3 bytes of destination slot ion Major Type 5.1
-
-NOTE Class is 4 bits here, for special values as extensions
-
-TBD атомы отдельно до 32767 без классов, путь в дереве однобайтными индексами,
-GetValue на ноду дает её массив до 256: байт инфы, 0=Deleted, 1=IntegerIndex,
-2=AtomNotYetNegoti, 3=(один или два байта атома имени следуют), затем биты
-типа - дать null, для node выделить два - индексы и map? пустой аргумент
-GetValue - enumerate корня дерева? TODO перенумеровать чтоб 0xFF конец блока
-TBD это дерево вместо CBAR? крипту, ключи - тоже в него?
 TBD придется согласование максимального числа атомов, макс. вложенности дерева
 
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+
-     |Sta|I| specific| I=0 int
-     +-+-+-+-+-+-+-+-+
-
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+
-     |Sta|0|Type |Val| Type 8/16/32/64 Un/Signed, Val: 0=not incl, 1=bytes
-     +-+-+-+-+-+-+-+-+  follow, or short value: 2=false (0), 3=true (1)
-
-TBD в 1/2-байтном номере атома надо как есть 6-7 битных 1-2 символа, если это
-очень короткая строка
-
-TBD если расширить число стримов до 14 бит, и атомы иметь до 14 бит, логично
-и индексы на level of tree иметь по 14 бит - дать им в VarInt15 еще один бит
-типа индекс или имя (атом) ? совмещать ли в одной ноде массив и мап?
-TBD тогда больше 256 и они могут не влезть в максимальный блок, вместо Deleted
-сделать дельту до следующего номера? в атомах-то точно могут быть дырки
-TBD дельту смысл тогда, когда еще инфа, иначе битмапы (формат общий с SACK) ?
-TBD если не влезает, нужен аналог sysctl.net/GetNext для мб парента дерева
 -> если корень Septinovile на 9 корней и длина 0..6 -> 12+1=13 макс. путь,
 ну в 19 байт так влезет
 
@@ -3200,141 +3142,9 @@ algorithm.HMAC.HalfSipHash.0.1: 4
 algorithm.HMAC.HalfSipHash.0.length(2): 4
 algorithm.compress.deflate: true
 
-
-SIMPLE_FALSE		20
-SIMPLE_TRUE		21
-SIMPLE_NULL		22
-SIMPLE_UNDEFINED	23
-
-SIMPLE_HALF		25
-SIMPLE_FLOAT		26
-SIMPLE_DOUBLE		27
-emtpy string		28
-one-byte string		29
-string len VarInt15	20
-cd ..           	31
-
--- variant 2:
-
-Int:
-
-      0               
-      0 1 2 3 4 5 6 7     CBOR Major Type M:
-     +-+-+-+-+-+-+-+-+    0 - Positive Int
-     |1|0|M|AdditInfo|    1 - Negative Int
-     +-+-+-+-+-+-+-+-+
-
-Node/Deleted/String:
-
-      0               
-      0 1 2 3 4 5 6 7     Add IndxInc and cd to node or Deleted
-     +-+-+-+-+-+-+-+-+    0..23 - cd node 0..11, even L=0, odd L=1
-     |1|1 0|IndxInc+L|    24..30 - skip this and 0..6 more as Deleted
-     +-+-+-+-+-+-+-+-+    31 - Deleted: Set Index in next byte, use after break
-
-0..17 - byte string
-18..23 - cd node 0..2, even L=0, odd L=1
-24 - Deleted: Set Index in next byte, used after break
-STRING_LEN_VARINT15  	25 # next 1 or 2 bytes with len for byte string 
-26..31 - skip this and 0..5 more as Deleted
-
-CBOR Strings and Special:
-
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+
-     |1 1 1|StrSimple|
-     +-+-+-+-+-+-+-+-+
-
-CBOR string, length 2..21 0..19
-SIMPLE_FALSE		20
-SIMPLE_TRUE		21
-SIMPLE_NULL		22
-SIMPLE_UNDEFINED	23 # truncated, "deleted" only in Set!
-Atom			24
-SIMPLE_HALF		25
-SIMPLE_FLOAT		26
-SIMPLE_DOUBLE		27
-TAG_STRING_LEN_VARINT15	28
-Reserved		29
-Reserved		30
-break ("cd ..")         31
-
 TBD in addition to Atom, need 'symlink' or 'mount' type with OID Path - to be
 e.g. able to persistent store only 'session.*' and compression dictionaries
 refer to that subtree
-
-   For CBOR strings, parsing is as follows: high 3 bits of first byte are
-   examined, and if they are equal to 0b010, that is, CBOR Major Type 2,
-   then 2 is changed to 6, first byte(s) are parsed as CBOR Tag, and rest
-   of string is viewed as CBOR binary string tagged with this tag, without
-   the byte string header (as it is already known to be binary string and
-   length is also known). Otherwise, it is parsed according to CBOR rules.
-   This allows to save 1 to 3 bytes of CBOR byte string header in many
-   common cases for single byte string tags, while still allowing type
-   on value, e.g., for typed arrays, UUIDs or bignums.
-
-node value header:
-
-      0                   1
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
-     | Length, use L |  Max Index    | Node Value, 1..512 bytes
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
-
-для ноды - тело value не более 512 байт, из элементов формата
-
-      0                   1
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |0|     Atom    |Atom cont. opt.| 
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-      0                     0
-      0 1 2 3 4 5 6 7       0 1 2 3 4 5 6 7
-     +-+-+-+-+-+-+-+-+     +-+-+-+-+-+-+-+-+
-     |1|Index, 0..95 |     |1|1 1| Deleted |
-     +-+-+-+-+-+-+-+-+     +-+-+-+-+-+-+-+-+
-
-позволяющего описать полностью заполненный 256-массив 3-мя байтами
-
-TBD если простой Get вернул скаляр, первый байт просто его тип, а если этот
-путь запроса есть нода?
- -> завести отдельный код в однобайтовом пути для такого?
-
-TBD для GetNext граничные случаи:
-
-1) если prev скаляр и next скаляр в той же ноде, или скип, просто он сам
-2) если prev скаляр и next нода в той же ноде - точно так же, код 110*
-3) если prev скаляр и next уровнем выше:
-
-   prev: 1.2.3.4.5
-   next: 1.2.3.5
-
-   то тоже как обычно, break (cd ..) - индекс следующего известен из пути,
-   т.е. будет:
-   0xff break    - явный
-        index:=5 - неявный
-   код для 1.2.3.5 как если бы внутри 1.2.3 находимся, включая
-
-   3.1) скаляр, если он скаляр
-   3.2) код 110*, если это нода
-
-4) если prev скаляр и next уровнем выше:
-
-   prev: 1.2.3.4.5
-   next: 1.2.5.6
-
-   4.1) здесь потребовался бы два раза break и потом cd node skip=1
-   4.2) можно выдать сразу абсолютный пусть 1.2.5 и данные ноды
-
-   в обоих случаях возможно, что данные ноды не влезут
-   -> завести отдельный код в однобайтовом пути для такого
-
-5) если prev был нодой, например из пункта 4.2, то надо ли напоминать, что
-   он был нодой? чтобы выдать бит L для длины всего ответа?
-TBD в пунктах 1-4 - тоже, как задать длину данных всего ответа?
-
 
 TBD команда ResolvePath: нулевой байт как у обычного пути, но N задает,
 сделать ли заодно ответ на Get этого же пути, а длина не в байтах, а в
@@ -3345,55 +3155,6 @@ TBD команда ResolvePath: нулевой байт как у обычног
 -- variant SQL:
 
 take record format from SQLite, somewhat modified
-
-
-   short path[8];
-   int last;
-
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+-+-+...
-     |0 0|Septinovile| Absolute Path...
-     +-+-+-+-+-+-+-+-+-+-+...
-
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+-+-+...
-     |0 1|Dec|Inc|Add| Add bytes, 0 to 3
-     +-+-+-+-+-+-+-+-+-+-+...
-
-  last -= Dec+1;
-  path[last] += Inc;
-  for i in (0..Add) {
-      path[++last] = Addbytes[i];
-  }
-
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+
-     |1|Incr Last Ptr|    path[last] += incr+1;
-     +-+-+-+-+-+-+-+-+
-
--- variant SQL 2:
-
-TBD if 32768 streams, then may be up to 4 VarInt15 children, and Pyramint5-like
-encoding which are atoms and which are integers to decoded CBAR list  - so don't
-need ResolvePath and relative paths, simplicity is plus
-
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+
-     |Root |WhichAtom|
-     +-+-+-+-+-+-+-+-+
-
-            0 a a a a - path[4]
-            1 0 b b b - path[3]
-            1 1 0 c c - path[2]
-            1 1 1 0 d - path[1]
-            1 1 1 1 x - no path: root-only or special value
-TBD what to encode - is_atom or 8/16 bit where atoms negative? latter allows 65535 atoms
--> length allows to put length field in front so to shorten header
-  -> invert 0/1 so length could be just count of set bits?
 
 TBD for sublists with tree of streams, even 64 Kb is not enough - use
 Septinovile as 7 or 9 to be multiplier of usual length field?
@@ -3820,17 +3581,19 @@ TBD CBAR ?
 
    Commands and meaning of their immediate argument:
 
-     N | Command       | Immediate argument    | Explicit argument count
-     ==+===============+=======================+========================
-     0 | SWITCH_STREAM | Stream number         | 0
-     1 | WINDOW_ADJUST | Set/Shift/NULL/parent | 0 or 1
-     2 | QOS_REJECT    | ErrCode + MsgID low 2 | 2
-     3 | QOS_PARTIAL   | LengthK + MsgID low 2 | 0
-     4 | QOS_ACK       | Message ID low 2 bits | 2
-     5 | QOS_REC       | Message ID low 2 bits | 2
-     6 | QOS_REL       | Message ID low 2 bits | 2
-     7 | QOS_COMP      | Message ID low 2 bits | 2
-     8 | SKIP_BLOCKS   | (N << 3 ) + U         | N+1
+     N | Command       | Immediate argument     | Explicit argument count
+     ==+===============+========================+========================
+     0 | SWITCH_STREAM | Stream number          | 0
+     1 | WINDOW_ADJUST | Set/Adjust/NULL/Parent | 0 or 1
+     2 | QOS_REJECT    | ErrCode + MsgID low 2  | 2
+     3 | QOS_PARTIAL   | LengthK + MsgID low 2  | 0
+     4 | QOS_ACK       | Message ID low 2 bits  | 2
+     5 | QOS_REC       | Message ID low 2 bits  | 2
+     6 | QOS_REL       | Message ID low 2 bits  | 2
+     7 | QOS_COMP      | Message ID low 2 bits  | 2
+     8 | SKIP_BLOCKS   | (N << 3 ) + U          | N+1
+
+TODO cmd PLEASE_OPEN_WINDOW
 
    Other command numbers are reserved and MUST be treated as errors.
 
@@ -3860,8 +3623,8 @@ TBD CBAR ?
    Message ID is obtained by pseudocode:
 
      cur_tv_sec += tv_sec Delta
-     msgid_tv_sec := cur_tv_sec
-     msgid_low32  := (tv_usec << 12) | ((cur_stream & 1023) << 2) | Low
+     msgid.tv_sec := cur_tv_sec
+     msgid.low32  := (tv_usec << 12) | ((cur_stream & 1023) << 2) | Low
 
    Error code is currently used only in QOS_REJECT command, in QOS_PARTIAL this
    is Saved Length field.
@@ -3889,44 +3652,46 @@ TODO copy behaviour description here from MQTT 5.0 standard
         2         2 1                 1         
         5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |            Arg15            |Shift|ArgType|Command|
+       |                Arg19                |SubOp|Command|
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
        |                       Arg26                       |
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
    Explicit argument, named Arg26, is not always present, exact operation,
-   including possible re-parent of stream, is defined by ArgType in the
-   folowing table (where "<< S" means "shift left by value of Shift field"
-   and "." means concatenation of bit strings):
+   including possible re-parent of stream, is defined by SubOp in the
+   folowing table:
 
-         | No reparent        | Set NULL         | Set
-Window   | operation          | parent           | parent
----------+--------------------+------------------+--------------------------
-Set NULL | 0.                 | 1.               | 2.
-         | window := NULL     | window := NULL   | window := NULL
-         |                    | parent := NULL   | parent := H(Arg15, Shift)
-         |                    | weight := Shift  | weight := Arg15 >> 12
----------+--------------------+------------------+--------------------------
-Adjust,  | 3.                 | 4.               | 5.
-short    | window += Arg15    | window += Arg15  | Reserved
-argument |           << Shift | parent := NULL   | 
-         |                    | weight := Shift  |
----------+--------------------+------------------+--------------------------
-Adjust,  | 6.                 | 7.               | 8.
-long     | window += Arg15    | window += Arg26  | window := Arg26
-argument |         . Shift    | parent := NULL   | parent := H(Arg15, Shift)
-         |         . Arg26    | weight := Shift  | weight := Arg15 >> 12
----------+--------------------+------------------+--------------------------
-Set,     | 9.                 | 10.              | 11.
-short    | window := Arg15    | window := Arg15  | Reserved
-argument |           << Shift | parent := NULL   | 
-         |                    | weight := Shift  |
----------+--------------------+------------------+--------------------------
-Set,     | 12.                | 13.              | 14.
-long     | window := Arg15    | window := Arg26  | window := Arg26
-argument |         . Shift    | parent := NULL   | parent := H(Arg15, Shift)
-         |         . Arg26    | weight := Shift  | weight := Arg15 >> 12
----------+--------------------+------------------+--------------------------
+   SubOp | Description           | Arg26 | Pseudocode
+   ------+-----------------------+-------+--------------------------------
+      0  | Window, Set NULL      | No    | window := NULL
+      1  | Window, Adjust, short | No    | window += Arg19
+      2  | Window, Adjust, long  | Yes   | window += (Arg19 << 26) | Arg26
+      3  | Window, Set, short    | No    | window := Arg19
+      4  | Window, Set, long     | Yes   | window := (Arg19 << 26) | Arg26
+      5  | Window, Please Open   | No    | read(cur_stream, Arg19)
+      6  | Reparent, see below   | No    | See below
+      7  | Reserved for future use, MUST be treated as error
+
+   For reparent operation, the Arg26 is not used and Arg19 is further
+   subdivided into 
+
+        2         2 1                 1         
+        5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+       | Weight  | Parent Stream ID  |Splice |1 1 0|Command|
+       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   The Splice argument, named after Perl function splice(), defines where
+   cur_stream will be put in hierarchy:
+
+   0 - Set Parent to NULL
+   1 - Exclusive flag
+   2 - push
+   3 - unshift
+
+TBD less bits for splice? move parent to separate command = more bits for future?
+
+TBD move weight to config, as it is mass operation so will better compress in CBAR?
 
 TBD push/unshift bit for reparent & excl in Shift? weights in Hi 5 of Arg15 ? 
 |    An exclusive flag allows for the insertion of a new level of
@@ -3944,16 +3709,9 @@ TBD push/unshift bit for reparent & excl in Shift? weights in Hi 5 of Arg15 ?
 |      B   C              / \
 |                        B   C
 
-TBD so scarce bits, may be split to several commands?
-
-   That is, values 5, 11 and 15 of ArgType are reserved and MUST be treated
-   as error. Argument (Arg26) is present only if ArgType is 6, 7, 8, 12, 13
-   or 14.
-
-   Note that maximum possible values for window can be up to 44 bits wide 
-   (Arg15 as most siginficant bits, then 3 bits of Shift field (losing it's
-   shift meaning), then Arg26 as least significant bits) with long argument
-   without reparent operation. As 32-bit implementations have to keep their
+   Note that maximum possible values for window can be up to 45 bits wide 
+   (Arg19 as most siginficant bits, then Arg26 as least significant bits)
+   with long argument. As 32-bit implementations have to keep their
    window as signed value, sender MUST put such values that, after
    calculations, window will not exceed 2^31-1 bytes, unless an extension
    was negotiated at INIT stage.
@@ -5715,6 +5473,26 @@ RFC 4341 (DCCP CCID2):
    and Congestion Window Reduced.
 
 ACK Ratio changing as handling congestion on return path
+
+RFC 4653 Improving the Robustness of TCP is about raising DupThresh count > 3:
+     * The requirement imposed by TCP for almost in-order packet
+       delivery places a constraint on the design of future technology.
+       Novel routing algorithms, network components, link-layer
+       retransmission mechanisms, and applications could all be looked
+       at with a fresh perspective if TCP were to be more robust to
+       segment reordering.  For instance, high-speed packet switches
+       could cause resequencing of packets if TCP were more robust.
+       There has been work proposed in the literature explicitly to
+       ensure that packet ordering is maintained in such switches (e.g.,
+       [KM02]).  Also, link-layer mechanisms that attempt to recover
+       from packet corruption by retransmitting could be allowed to
+       reorder packets, and thus increase the chances of local loss
+       repair rather than rely on TCP to repair the loss (and,
+       needlessly reduce its sending rate).  Additional examples include
+       multi-path routing, high-delay satellite links, and some of the
+       schemes proposed for a differentiated services architecture.  By
+       making TCP more robust to non-congestion events, TCP-NCR may open
+       the design space of the future Internet components.
 
 
 8. Обработка сбоев.
