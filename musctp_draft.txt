@@ -62,7 +62,8 @@ RFC 8546 wire image:
 
 for example, QUIC's spin bit (an ugly kludge for measuring RTT
 by on-path observers) is easily replaced by unencrypted packets with
-HEARTBEAT, ECHO. ECNE_CWR and LINK_INFO options
+HEARTBEAT, ECHO. ECNE_CWR and LINK_INFO options, while all other packets could
+remain encrypted
 
 "Let's simplify user interface features" paradigm is bad and wrong, as seen on example
 of TCP-3 [IEN21] this leads to problems in strategic perspective; [RFC 9170]
@@ -74,6 +75,27 @@ due to Unix Time is bad in long scale, Leap Seconds and other problems, this
 protocol version MUST NOT be used in XXII century (recommended method will be
 e.g. Juliand Days or CCSDS DAY SEGMENTED TIME CODE), so, for this version,
 tv_sec is simply limited to 32 bits (unsigned) and that's it.
+
+
+https://apenwarr.ca/log/20170810 describes problems of WiFi repeaters and LTE
+due to bridging - which can be solved by changing from 4-tuple, that is,
+Connection Tag of muSCTP (TBD may be have it longer by variable-length bits?)
+
+RFC 6830                          LISP                      January 2013
+   Address Family Identifier (AFI):   AFI is a term used to describe an
+      address encoding in a packet.  An address family currently
+      pertains to an IPv4 or IPv6 address.  See [AFI] and [RFC3232] for
+      details.  An AFI value of 0 used in this specification indicates
+      an unspecified encoded address where the length of the address is
+      0 octets following the 16-bit AFI value of 0.
+
+RFC 8376:
+   The DNS query/answer protocol as a precursor to other communication
+   within the Time-To-Live (TTL) of a DNS answer is clearly problematic
+   in an LPWAN, say where only one round-trip per hour can be used, and
+   with a TTL that is less than 3600 seconds.  It is currently unclear
+   whether and how DNS-like functionality might be provided in LPWANs.
+-- muSCTP could be used directly with DNS as sockaddr?
 
 
 1.1. Общий обзор.
@@ -375,6 +397,10 @@ TBD переименовать Verification, разобраться с Nfewnce, 
   (аналог PPID в SCTP передается в каждом блоке, но здесь пакеты слишком
   короткие, чтобы тратить 4 байта на каждый блок, а вот время от времени можно).
 
+   Some LPWAN technologies provide quasi-bidirectional connectivity,
+   whereby a Downlink transmission from the Network Infrastructure can
+   only take place right after an Uplink transmission by the Dev.
+
 1.3. Philosophical background and values.
 
    attacks such as ALPACA
@@ -382,7 +408,15 @@ TBD переименовать Verification, разобраться с Nfewnce, 
    mixing layers
 
    or disabling compression for individual messages - something simply not
-   possible with byte streams
+   possible with byte streams:
+
+   Some packet compression methods are known to be susceptible to
+   attacks, such as BREACH and CRIME.  The attack involves injecting
+   arbitrary data into the packet and observing the resulting compressed
+   packet size.  The observed size potentially reflects correlation
+   between the arbitrary data and some content that was meant to remain
+   secret, such as a security token, thereby allowing the attacker to
+   get at the secret.
 
 2. Общий формат пакетов, идентификаторов и структур адресов.
 
@@ -428,6 +462,16 @@ and UDP port 9426 for tunnel "UDP-Example"
 
 TBD better name than "tunnel" ?
 - "bearer" from TIPC ? "carrier" ?
+
+TBD there is AFI first appeared in RIPv2
+<http://www.iana.org/assignments/address-family-numbers/address-family-numbers.xhtml>
+do we need to suport it?
+- there will be cases when AFI would be NULL, e.g. when address is "http://domain/url"
+- probably may be paired with protocol number, to be able to have
+  not only [1, "UDP", address...]
+  but also e.g. [[1, 2], "UDP", address...] for both IPv4 and IPv6 ?
+  - no, not array, coz v4 and v6 will have different addresses
+
 
 TODO описать дерево в атомах, где их номера
 
@@ -490,13 +534,15 @@ TODO
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSL|R|               Connection Verification Tag               |
+     |TSL|M|               Connection Verification Tag               |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     .    0/1/2/4 байта - Transmission Sequence Number (TSN) Base    .
+     .    0/1/2/4 bytes - Transmission Sequence Number (TSN) Base    .
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     .           if A=1, then 4 bytes of body of AUTH option         .
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |   Options (if any) ...
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |1 1 1 1 1 1 1 1|    Payload / Padding (if any) ...
+     |1 1 1 1 1 1 1 1|         Padding (if any) ...
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
   Здесь в фиксированном заголовке:
@@ -516,9 +562,49 @@ TODO
 protocol is built so that - except optional cryptographic part - only 32-bit
 arithmetics is required from underlying hardware, and, in some cases, 64-bit
 values in only logical/masking operations, effectively on subfileds, so that
-e.g. 64 bits split into 29 bits of first Connection Tag, then 6 bits of Server
-Instance Number, then 29 bits of second Connection Tag - could be parsed by
+e.g. 64 bits of Message ID split into 32 bits of time in second, 20 bits of
+milliseconds, 10 bits stream and 2 bit flags - this could be parsed by
 processing two 32-bit words
+
+what         | non-constrained | constrained
+000 non-zero | 4 bytes         | 4 bytes, A=0
+001 any      | 5 bytes         | 4 bytes, A=1
+010 any      | 6 bytes         | 5 bytes, A=0
+011 any      | 7 bytes         | 5 bytes, A=1
+100 non-zero | 8 bytes         | 6 bytes, A=0
+101 any      | Reserved        | 6 bytes, A=1
+110 any      | Reserved        | 7 bytes, A=0
+111 any      | Reserved        | 7 bytes, A=1
+000 zero     | 4 bytes, indicate INIT packet
+100 zero     | 4 bytes, indicate error flag (ABORT packet)
+
+TBD 7 is too much for constrained, 6 max is enough, and only in c2s direction
+
+TBD combine with M so M=1100 and above?
+- then need change SRTLn in ABORT also
+
+TFLL SocketID | non-constrained | constrained
+0000 zero     | 4 bytes, indicate INIT packet
+0000 non-zero | 4 bytes         | 4 bytes, IM=0, A=0
+0001 any      | 5 bytes         | 4 bytes, IM=0, A=1
+0010 any      | 6 bytes         | 4 bytes, IM=1, A=0
+0011 any      | 7 bytes         | 4 bytes, IM=1, A=1
+0100 zero     | Prohibited due to E / zero compression to T23
+0100 non-zero | 8 bytes         | 5 bytes, IM=0, A=0
+0101 any      | 10 bytes        | 5 bytes, IM=0, A=1
+0110 any      | 12 bytes        | 5 bytes, IM=1, A=0
+0111 any      | 14 bytes        | 5 bytes, IM=1, A=1
+1000 non-zero | 16 bytes        | 6 bytes, IM=0, A=0
+1000 zero     | 4 bytes, indicate error flag (ABORT packet)
+1001 any      | 20 bytes        | 6 bytes, IM=0, A=1
+1010 any      | Reserved        | 6 bytes, IM=1, A=0
+1011 any      | Reserved        | 6 bytes, IM=1, A=1
+11xx any      | Reserved for Multicast / Group Communications
+
+TBD what to do with E / zero compression to T23 ? Reserve for another packet
+type or just prohibit?..
+
+TBD move tag len to tunnel format so 11 compression rules could be used?
 
   Поле TSN имеет то же значение, что и в SCTP - номер блока данных при передаче
   данных с подтверждением, имеет полный "виртуальный" размер 32 бита, и
@@ -1344,7 +1430,7 @@ long options (0xE0..EF):
       0                   1                   2
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
-     |1 1 1 0| Option Number |     Option Length     | Option Data
+     |1 1 1 0|     Option Length     | Option Number | Option Data
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
 
 for compressed, make it always authenticated? to check correctness
@@ -1356,46 +1442,6 @@ TBD with ABES, still has header checking problem: dispatch result like
 "length/PPID" should be presented to user as early as possible (for decision),
 but HMAC will be at end of entire block, needing to buffer or blindly trust...
 
--- variant 25
-
-google "65000 tcp connections" problem, so a variant instead of Stream ID...
-
-      0               
-      0 1 2 3 4 5 6 7 
-     +-+-+-+-+-+-+-+-+
-     |0|Intrn|A|B|E|S|
-     +-+-+-+-+-+-+-+-+
-
-      0                   1           
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |1 0| Deliv Obj, 10 bit |A|B|E|S|
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-      0                   1                   2       
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |1 1 0|     Delivery Object, 17 bit     |A|B|E|S|
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-
-      0                   1                   2                   3
-      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |1 1 1|             Delivery Object, 25 bit             |A|B|E|S|    
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
-pros:
-- streams can be used whatever app needs, e.g. 1000000 channels and 10 ordered
-  messages and 20 unordered
-
-cons:
-- parser need to lookup object in table before know how to parse rest
-- how to create new Delivery Object? require confirmation thus 1+ RTT ?
-- reuse: if we delete Delivery Object slot, there are could be duplicate packets
-  to it in flight
-
--- /variant 25
 
   Во время установления и завершения ассоциации фиксированный заголовок
   трактуется особенным образом, поэтому они рассмотрены в отдельных
@@ -1517,7 +1563,7 @@ pyramint4:                             1000 1001 1010 1011 1100 1101 1110 1111
 
 TBD Pyramint9 for 2^45 perfectly matches max of 2^31 TSN * 16 Kb packet, has
 it enough granularity on low values to avoid SWS ?
-TBD is it really 2^45 ? recheck
+TBD is it really 2^45 ? recheck, seems only 2^44
 
 TBD и что-то не сходится
 
@@ -1794,6 +1840,7 @@ TODO убрать MAC Len|NonceLen из туннелей, добавить MSS|M
     XL  Old e.g. SLIP  256-512  296-576      12-20    UQ22.10
    XXL  Normal IPv4/6  512+     576+         16-32    UQ32.14
 
+TBD http://en.wikipedia.org/wiki/Q_(number_format) is for fractions, is it correct here?
 
 3.2. Параметры INIT/INIT_ACK.
 
@@ -2093,11 +2140,13 @@ TBD заменить Res/FracS на максимальную гранулярн�
         2                |2 1            |    1      |
         9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |                   Reserved                    |C|Too|S|TEL|
+       |                   Reserved              |MaxCT|C|Too|S|TEL|
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
     * C, 1 bit - Clean Start as in MQTT
     * Too - how many seconds "too much" is, as 2^(Too+3), that is, 3 means 64 sec
+    * MaxCT - maximum length of Connection Tag supported by client, in TBD-bit
+      words, 0 for just first 26 bits
 
   The flags from server:
   (note bits numbering from right)
@@ -2116,7 +2165,7 @@ TBD заменить Res/FracS на максимальную гранулярн�
      00 - none (timestamp field absent)
      01 - 1 high byte
      10 - 2 high bytes
-     11 - full 4 bytes TBD or 3 ? do we require tunnels to provide 8 bits in INIT too?
+     11 - full 4 bytes TBD or 3 ? do we require tunnels to provide low 8 bits in INIT too?
    S - Synchronize:
      * from client: "I will use your time if it differs too much"
      * from server: "I have NTP synchronized clock"
@@ -2940,7 +2989,7 @@ TBD Total Length, or Remaining Length? same size on > ~8 Mb though
    maximum size is 255K = 261120 bytes), for low MTU when tunnel does not have
    HMAC - so having HMAC by TSN layer at end of block would mean delaying
    delivery control data to dispatcher until all user part received (may be
-   just to find that it should thrown away).
+   just to find that it should be thrown away).
 
    NOTE that "single chunk, first block" case on very low MTU would have not
    enough space for TIMESTAMP option on retransmit if all length fields are at
@@ -4952,12 +5001,97 @@ middle/last fragments:
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
 
 TBD Last+FragNumber to increase offset to 96 ? then minimal Packet Counter width question...
+- L could be just right bit to not divide 192 by 2
 
    When chain of fragments is successfully traversed from last to first,
    receivers frees all buffered FRAGMENT options of packets with Packet
    Counter from first to last.
 
 TBD what if last succesfull was not last try, how to free those after last?
+
+-> each frag must be extended with pointer to first frag so it's known which
+   chain it belongs to
+   - this must not be sum, as e.g. 256+1 and +96 just leaves space for
+     interleaving without real possibility to put e.g. 256+30 between them
+
+middle/last fragments:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |PktCntrOffset|L|FirstPktCntrOfs| Fragment of Chunk Data...
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+first fragment:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 0 0|      Chunk Length     |ChuType|A|B|E|S|ShKeyID|HMACLen|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |      tv_sec Delta     |           tv_usec, 20 bits            |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |                 Transmission Sequence Number                  |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     | Chunk Data, after first byte...
+     +-+-+-+-+...
+
+HMACLen:
+
+ 0 - no HMAC
+ 1 - 4 bytes
+ 2 - 6 bytes
+ 3 - 8 bytes
+ 4 - 10 bytes
+ 5 - 12 bytes
+ 6 - 14 bytes
+ 7 - 16 bytes
+ 8 - 20 bytes
+ 9 - 24 bytes
+10 - 28 bytes
+11 - 32 bytes
+12 - 40 bytes
+13 - 48 bytes
+14 - 56 bytes
+15 - 64 bytes
+
+drop fragment buffers (Sender-Abort):
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 0 1|Reservd| Array of bytes, each is PktCntrOffset to drop
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-...
+
+receiver error:
+
+      0                   1                   2                   3
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 1 1 0|ErrCode|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+TBD only TSN or unknown frags also? 
+- may be just use TIMESTAMP reply for this? TBD bitmap/array for more pkts to
+  report?
+
+
+RFC 8724:
+   SCHC ACK REQ:  A request by the sender for a SCHC ACK from the
+      receiver.
+
+   SCHC Sender-Abort:  A message by the sender telling the receiver that
+      it has aborted the transmission of a fragmented SCHC Packet.
+
+   SCHC Receiver-Abort:  A message by the receiver to tell the sender to
+      abort the transmission of a fragmented SCHC Packet.
+
+   The RCS MUST be computed on the full SCHC Packet concatenated with
+   the padding bits, if any, of the SCHC Fragment carrying the last
+   tile.  The rationale is that the SCHC reassembler has no way of
+   knowing the boundary between the last tile and the padding bits.
+   Indeed, this requires decompressing the SCHC Packet, which is out of
+   the scope of the SCHC reassembler.
+
 
 -- /variant Packet Counter
 
@@ -6064,6 +6198,9 @@ Appendix B. Example tunnel: UDP tunnels of size M and XXL.
    Version/Size field, if several Version/Size are implemented on a single
    listening UDP port.
 
+   Also all UDP tunnels have Connection Verification Tag in second 4-byte word
+   when header compression (that is, INIT) is not applied.
+   TBD what with variable length tag?
 
 size XS:
 
@@ -6072,7 +6209,7 @@ size XS:
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |VerSzXS|IWL|ServInstNum|ShKeyID|ErsatzMAC|FracS| tv_sec 8 bits |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSL|R|               Connection Verification Tag               |
+     |TSL|M|               Connection Verification Tag               |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |Packet Counter |                                               /
      +-+-+-+-+-+-+-+-+                                               \
@@ -6111,7 +6248,7 @@ UDP Size M in Established state (usual packet):
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |VerSizM|0|OnP| Packet Counter  |FEC/W/L|T| tv_sec Low 11 bits  |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSL|R|               Connection Verification Tag               |
+     |TSL|M|               Connection Verification Tag               |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      | Shared Key ID |ServInstNum| tv_usec Hi 10 bits|    Nonce,     /
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+  optional,    \
@@ -6436,6 +6573,9 @@ IPv4/IPv6 packet.
   where addresess are got by external means. Thus, at least one bit to
   distinguish in raw IP case is required, but it is abstracted to entire
   ports, for cases there is need for  more bits of entropy in address.
+
+TODO rewrite prev paragraph for different Tag length and also that port is
+unavoidable in INIT/ACK packets
 
    Following tradition of early TCP/IP, servers listen on odd ports and
    clients send from even ports. So in most compressed form, when H is 0,
