@@ -98,6 +98,140 @@ RFC 8376:
 -- muSCTP could be used directly with DNS as sockaddr?
 
 
+https://ipj.dreamhosters.com/wp-content/uploads/2023/01/253-ipj.pdf :
+
+THE INTERNET PROTOCOL JOURNAL
+11
+RPC Support
+IP hosts commonly support just two transport services, UDP and
+TCP. UDP is a simple datagram-delivery service. Data encapsulated
+using UDP have no assured delivery. TCP, as we have seen, is a reli-
+able streaming service. The TCP protocol repairs any packet loss or
+changes to the delivered packet sequence.
+Another model, namely the Remote Procedure Call (RPC) model,
+emulates the functionality of procedure calls, and rather than the byte-
+stream model of TCP or the datagram model of UDP, the RPC model
+is a reliable request/reply model, where the reply is uniquely associated
+with the request. Perhaps the most well-known example today of an
+RPC framework is gRPC[8]. gRPC is based on an HTTP/2 platform,
+implying that the framework is susceptible to head-of-line blocking as
+with any other TCP-based substrate.
+The issue here is that a reliable byte stream is not the right abstrac-
+tion for RPC, as the core of RPC is a request/reply paradigm, which
+is more aligned to a reliable messaging paradigm, with all that such
+a paradigm entails. A capable RPC framework needs to handle lost,
+mis-ordered, and duplicated messages, with an identifier space that
+can match requests and responses. The underlying message transport
+needs to handle messages of arbitrary size, which entails packetization
+adaptation within the transport.
+The bidirectional stream framework is a reasonable match to the RPC
+communications model where each RPC can be matched against an
+individual stream. The stream is reliable and sequenced. The data
+framing is not contained in QUIC, and it is still an application task to
+add a record structure to an RPC stream, if that is what is required.
+The invocation overhead is low in that the encrypted end-to-end con-
+nection is already established.
+It certainly appears that HTTPS behaves much more like RPC than
+a reliable byte stream. That can benefit applications that run over
+HTTP(S), such as gRPC, and a set of Representational State Transfer
+(REST)ful APIs.
+
+Load-Balancing QUIC
+In today’s world of managing scale, it is very common to place a front-
+end load balancer across many servers. The load balancer in the TCP
+world typically categorizes packets as being in the same TCP session
+because of a common 5-tuple value of protocol, IP addresses, and port
+numbers, with the confident assurance that this value is stable for the
+life of the TCP session.
+QUIC offers no such assurances. The 5-tuple load-balancing approach
+can work, but if the client is behind a NAT that performs what could be
+called “aggressive” rebinding, then any such load-balancing approach
+will be thrown. The reason why is that UDP does not provide session
+signalling to a NAT, so there is no a priori assurance that the NAT
+bindings (and the presented source address and port) will remain con-
+stant for the entire QUIC session.
+THE INTERNET PROTOCOL JOURNAL
+12
+Now in theory IPv6 could invoke the Flow-ID to provide a proxy
+persistent field that remains constant for a flow, but the Flow-ID is of
+limited size and has no assurances of uniqueness, as well as evidence
+of highly variable treatment by IPv6 network infrastructure and end
+hosts.
+This topic touches upon a major assumption in today’s high-capacity
+server infrastructure on the public Internet. Data streams use TCP and
+the DNS uses UDP. Using UDP to carry sustained high-volume streams
+may not match the internal optimisations used in server content-deliv-
+ery networks.
+DDoS Defence
+The next issue here is exposure to Distributed Denial-of-Service
+(DDoS) attacks. An attacker can send a large volume of packets to
+the server and cause the server to perform work to attempt to decrypt
+the packet. For this capability to be successful in TLS over TCP the
+attacker must make a reasonable guess of the TCP sequence number
+and window size for the packet to be accepted and passed to the TLS
+decoder. QUIC has no lightweight packet filter before the decoder is
+invoked.
+On the other hand, the session encryption uses symmetric crypto
+algorithms, which are less of a load on the receiver to decode than
+asymmetric encryption. Is this difference enough to allow large-scale
+QUIC platforms that are DDoS resistant to be constructed? I’m unsure
+if there are clear answers here, but it seems that it’s part of the cost of
+having a more complete encryption framework, which in itself appears
+to be sorely needed on the public Internet.
+Private QUIC
+For private contexts, can QUIC negotiate a “null” TLS encryp-
+tion algorithm? There is a bigger world out there beyond the public
+Internet, and in many private data centre environments the overheads
+of encrypting and decrypting packets may appear to be unnecessary.
+While QUIC can present some clear advantages in terms of suitability
+to complex application behaviours in the data centre that can lever-
+age QUIC’s multi-stream capability, the cost of encryption may be too
+high.
+Of course, there is nothing stopping an implementation using a null
+encryption algorithm, but such an implementation could talk only
+to other implementations of itself. Strictly speaking, if you remove
+encryption, then it’s no longer QUIC and it won’t interoperate with
+anything else that is QUIC.
+QUIC and OpenSSL
+It useful to ask that if QUIC has such clear advantages over TCP, then
+why hasn’t the adoption of QUIC been rapid? Metrics of QUIC use
+tend to point to a use rate of some 30% of web sessions (such as
+Cloudflare’s Radar report[9]).
+QUIC and TCP continued
+THE INTERNET PROTOCOL JOURNAL
+13
+However, if you alter the measurement to measure the extent to which
+browsers on end systems are capable of supporting a QUIC session,
+then the measurement jumps to 60%[10].
+There are a couple of reasons why QUIC use is far lower than QUIC
+capability. The first is that the Chrome browser still relies on the con-
+tent-level switch to QUIC, so the client has to visit the site for the first
+time using HTTP/2 (TCP/TLS) and thereby receive an indication if the
+server can support QUIC, and then on the second visit the client may
+use QUIC. It’s not quite as simple as this, as HTTP/2 uses persistent
+connection, so if the second visit is sufficiently close in time to the first,
+then the HTTP/2 session will remain open and still be used. The Safari
+browser is capable of using QUIC on first use because it is triggered by
+the Service Binding (SVCB) record in the DNS, but the market share
+of Safari is relatively small in comparison to QUIC.
+The second reason lies in the web server environment. Many servers
+rely on the OpenSSL TLS library[11], and so far, (November 2022)
+OpenSSL does not include support for QUIC. QUIC is supported in
+BoringSSL[12], but as the notes for BoringSSL state, BoringSSL is a
+fork of OpenSSL that is designed to meet Google’s needs, and while
+it works for Google, it may not work for everyone else. Google does
+not recommend that third parties depend on BoringSSL. There is also
+QuicTLS, a fork of OpenSSL that Akamai and Google support[13].
+This fragmentation of OpenSSL is not exactly helpful, and the result
+is that many server environments are waiting for OpenSSL to incorpo-
+rate a QUIC library. This effort was delayed by the work on OpenSSL
+release 3.0.0, and then the OpenSSL folks announced their intention
+to provide a fully functional QUIC implementation, and this develop-
+ment of a new QUIC protocol stack may further delay QUIC support
+in OpenSSL by months, if not years.
+
+
+
 1.1. Общий обзор.
 
    Ranging protocols (boundaries really are somewhat blurred) by upper scale:
@@ -585,26 +719,29 @@ TBD combine with M so M=1100 and above?
 
 TFLL SocketID | non-constrained | constrained
 0000 zero     | 4 bytes, indicate INIT packet
-0000 non-zero | 4 bytes         | 4 bytes, IM=0, A=0
-0001 any      | 5 bytes         | 4 bytes, IM=0, A=1
-0010 any      | 6 bytes         | 4 bytes, IM=1, A=0
-0011 any      | 7 bytes         | 4 bytes, IM=1, A=1
+0000 non-zero | 4 bytes         | no CompressRule, as is
+0001 any      | 5 bytes         | CompressRule=1
+0010 any      | 6 bytes         | CompressRule=2
+0011 any      | 7 bytes         | CompressRule=3
 0100 zero     | Prohibited due to E / zero compression to T23
-0100 non-zero | 8 bytes         | 5 bytes, IM=0, A=0
-0101 any      | 10 bytes        | 5 bytes, IM=0, A=1
-0110 any      | 12 bytes        | 5 bytes, IM=1, A=0
-0111 any      | 14 bytes        | 5 bytes, IM=1, A=1
-1000 non-zero | 16 bytes        | 6 bytes, IM=0, A=0
+0100 non-zero | 8 bytes         | CompressRule=4
+0101 any      | 10 bytes        | CompressRule=5
+0110 any      | 12 bytes        | CompressRule=6
+0111 any      | 14 bytes        | CompressRule=7
+1000 non-zero | 16 bytes        | CompressRule=8
 1000 zero     | 4 bytes, indicate error flag (ABORT packet)
-1001 any      | 20 bytes        | 6 bytes, IM=0, A=1
-1010 any      | Reserved        | 6 bytes, IM=1, A=0
-1011 any      | Reserved        | 6 bytes, IM=1, A=1
+1001 any      | 20 bytes        | CompressRule=9
+1010 any      | Reserved        | CompressRule=10
+1011 any      | Reserved        | CompressRule=11
 11xx any      | Reserved for Multicast / Group Communications
 
 TBD what to do with E / zero compression to T23 ? Reserve for another packet
 type or just prohibit?..
 
 TBD move tag len to tunnel format so 11 compression rules could be used?
+rule does not need CBAR but can be simple CBOR: uint=copy N bytes from pkt,
+bstr=add literal bytes, negative int for bits?
+  TBD full BPF for bit fields? but this is not simple for constrained devices...
 
   Поле TSN имеет то же значение, что и в SCTP - номер блока данных при передаче
   данных с подтверждением, имеет полный "виртуальный" размер 32 бита, и
@@ -981,6 +1118,22 @@ RFC 1323:
 TBD 
    other uses of the Timestamps option, such as the Eifel mechanism
    ([RFC3522], [RFC4015])
+
+TBD rule S3 means fragmentation on retransmit if shortened TSN - define 1-3
+byte SACK to fill such cases? or ECNE_CWR ?
+- Compression Rule of e.g. (0x64, 20 pkt bytes, 3-TSL ECNE bytes) (hardcode TSL cond)
+- needs "to which pkt it is reply" in Header and synthetic SACK from ECNE_CWR
+
+TODO RFC 3095 ROHC for stride
+4.5.2
+   Note that the decompressor follows the procedure described in the
+   previous section, except that in R-mode it MUST ACK each header
+   received with a succeeding CRC (see also section 5.5).
+
+      Note: The clock resolution of the compressor or decompressor can
+      be worse than TIME_STRIDE, in which case the difference, i.e.,
+      actual resolution - TIME_STRIDE, is treated as additional jitter
+      in the calculation of k.
 
 TODO
 
@@ -2181,6 +2334,13 @@ TBD proxy - e.g. for inspecting by firewalls, service request?
   -> separate DUP flag from timestamp and pass them in CBAR; atoms and all
      over config stream translated by proxy, except proxy.* subtree
 
+TBD tun problem - which of INIT? in gray mode each retransmit should have fresh
+timestamp for hiding, then, in case of loss, how to distinguish replies to them?
+- in ICMP this is solved automatically by echoing all, think about similar
+  echoing in other tunnels
+
+TBD similar problem exists with retransmits in ESTABLISHED state...
+
 -- /variant unfragmented
 
    SCTP used a trick where server does not keep any state at all by packing
@@ -2195,10 +2355,10 @@ TBD proxy - e.g. for inspecting by firewalls, service request?
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |Ver|0|1|                          0                            |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |SRTLn|      Echo of Connection Verification Tag of Sender      |
+     |SRT|       Echo of Connection Verification Tag of Sender       |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
-     /            Stateless Reset Token, 0..SRTLn bytes              /
+     /             Stateless Reset Token, 0..SRT words               /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
@@ -2925,6 +3085,10 @@ for Unordered middle chunks, as 2 bits for flags would unused otherwise (but
 TSN Offset still limited to 32768); also ideal for Message ID with stream
 number; the only sufferer is legacy Channel - reducing SSN to 19 bits
 
+TBD for Unordered may have Offset in middles also 20 bits - use 2 bits for SSN interleaving offset
+- no, this must in B=1, and there is space only if cut more bits from
+  length...
+
 TBD need to fix Parent in Window in STREAM_CONTROL for this? or just Arg15 can
 contain 10 bits and that's it?..
 
@@ -3158,6 +3322,7 @@ Header VarInt32:
    tree depth). Following SSH tradition, maximum size in 32-bit case is
    arbitrarily defined to be 34000 bytes, so maxumum row overhead fits in one
    1280-byte MTU packet.
+TBD zfs_btree 4096-(16+8*129)=3048 -> 1014 + 2 bytes length
 
   I_HAVE - байтовые строки с именами атомов как фич
 
@@ -3599,7 +3764,7 @@ TBD CBAR ?
 
    The Remaining Length field, present if BE=10, uses S bit as high bit (if
    BE=11 then S bit MUST be ignored) and specifies length after first chunk:
-   for example, Remaining Length equal to 511 in B-chunke with 256 bytes after
+   for example, Remaining Length equal to 511 in B-chunk with 256 bytes after
    header means 768 byte message in total. If E is set, then bit S MUST be
    ignored, that is, Stream Sequence Number is byte-aligned as usual and
    started from bit 8 in such case.
@@ -3684,7 +3849,7 @@ TODO cmd PLEASE_OPEN_WINDOW
 TODO reject codes
 
    QOS_PARTIAL serves for retransmission of large messages after restoring
-   broken connections, it's immediate argument specified which part of long
+   broken connections, it's immediate argument specifies which part of long
    message with this Message ID is successfully stored to stable storage,
    in units of 1 K bytes (1024 bytes). This is used after connection restored
    to save several round trip times which otherwise would be needed to reject
@@ -5092,6 +5257,7 @@ RFC 8724:
    Indeed, this requires decompressing the SCHC Packet, which is out of
    the scope of the SCHC reassembler.
 
+TBD if ack is lost, then SCHC has ACK-REQ by sender's timeout
 
 -- /variant Packet Counter
 
@@ -5520,12 +5686,11 @@ TBD что делать, если MTU сбросился ниже размера
 ответ: опция фрагментации станет обязательной
 
 TBD в SST можно некоторым стримам назначиться в cleartext, поддержать?
+- yes
 
 TBD если вводить атрибут reply, нужно и окно и для блоковых потоков: в SST
 окна для каждого, как и в ssh - сделать отдельный чанк и бит окна
 в байтах/блоках?
-
-TBD silly-window syndrome?
 
 DTLS [RFC 6347]:
    -  If repeated retransmissions do not result in a response, and the
@@ -5577,6 +5742,20 @@ RFC 7540                         HTTP/2                         May 2015
    be -44 KB on receipt of the SETTINGS frame.  The client retains a
    negative flow-control window until WINDOW_UPDATE frames restore the
    window to being positive, after which the client can resume sending.
+
+
+RFC 4821:
+   Because there is some small risk that suppressing congestion control
+   might have unanticipated consequences (even for one isolated loss),
+   it is REQUIRED that probe failure events be less frequent than the
+   normal period for losses under standard congestion control.
+   Specifically, after a probe failure event and suppressed congestion
+   control, PLPMTUD MUST NOT probe again until an interval that is
+   larger than the expected interval between congestion control events.
+   See Section 4 for details.  The simplest estimate of the interval to
+   the next congestion event is the same number of round trips as the
+   current congestion window in packets.
+
 
 /=== quotes from other protocols ===
 
@@ -6187,10 +6366,10 @@ Appendix B. Example tunnel: UDP tunnels of size M and XXL.
    distinguish between type, to have space for future versions and to
    indicate whether header compression was
 
-      0 1 2 3 4
-     +-+-+-+-+-+...
-     |VersnSize|
-     +-+-+-+-+-+...
+         0       1       2       3       4       5       6       7
+     +-------+-------+-------+-------+-------+-------+-------+-------+...
+     | Tunnel Format Version and Header Size |On-Path Device modified|
+     +-------+-------+-------+-------+-------+-------+-------+-------+...
 
    As changes to bit widths of fields during active link are not allowed
    (e.g. Packet Counter could wrap at wrong point), tunnels MUST silently
@@ -6202,12 +6381,12 @@ Appendix B. Example tunnel: UDP tunnels of size M and XXL.
    when header compression (that is, INIT) is not applied.
    TBD what with variable length tag?
 
-size XS:
+size S:
 
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSzXS|IWL|ServInstNum|ShKeyID|ErsatzMAC|FracS| tv_sec 8 bits |
+     |VerSizS|IWL|ServInstNum|ShKeyID|ErsatzMAC|FracS| tv_sec 8 bits |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSL|M|               Connection Verification Tag               |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -6222,6 +6401,8 @@ IWL:
 01 - usual
 10 - usual + Wrap Packet Counter
 11 - usual + Last Indicator
+
+TBD if ShKeyID+ErsatzMAC to Septinovile, then has space for OnPath
 
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -6246,11 +6427,11 @@ UDP Size M in Established state (usual packet):
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSizM|0|OnP| Packet Counter  |FEC/W/L|T| tv_sec Low 11 bits  |
+     |VerSizM|0|OnPat|FEC/W/L|tv_usec Hi 10 bits |T| Packet Counter  |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSL|M|               Connection Verification Tag               |
+     |TSL|M/CRule|           Connection Verification Tag             |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     | Shared Key ID |ServInstNum| tv_usec Hi 10 bits|    Nonce,     /
+     |Shared Key ID|ServInstNum| tv_sec Low 11 bits  |    Nonce,     /
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+  optional,    \
      /                  present / defined by Key Algo                /
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -6259,10 +6440,13 @@ UDP Size M in Established state (usual packet):
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
-     /         MAC, optional, present / defined by Key Algo,         /
-     \                 trimmed if T flag set                         \
-     /                                                               /
+     /         MAC, optional, present / defined by Key Algo          /
+     \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+T - if Connection Tag has 5 byte length
+
+TBD what if more bits for OnPath? then swap tv_[u]sec, ShKeyID=7 bits
 
 FEC Num/Wrap/Last:
 - 0      - packet is not under FEC
@@ -6289,8 +6473,9 @@ will flush FEC queue TBD and what? if on-path attacker could delete packets,
 this will achieve same effect
 -> report false XOR-packets (MAC failures after reconstruct) in ECNE_CWR ?
 
-OnP field is explicitly reserved for on-path devices to help problem of
+OnPat field is explicitly reserved for on-path devices to help problem of
 Section 4 of [RFC 8546], thus, it MUST NOT be included in HMAC calculation
+(MUST be set to zero by both sender and receiver before HMAC checking)
 TBD need we consider [RFC 8558] ?
 
 
@@ -6334,26 +6519,26 @@ TBD if variant INIT unfragged - move MTU to first byte of Fragment Cookie, which
 is CoAP (?) reply code if Frags=15/error
 
 lgMSS - limit MTU, safe MSS is:
-0    - 24 bytes
-1    - 32 bytes
+0    - 32 bytes
+1    - 48 bytes
 2..6 - 2^(4+lgMSS) bytes (that is, 6 means 1024 bytes)
-7 - 1440 on IPv4, 1408 on IPv6
+7 - 1248 on IPv4, 1216 on IPv6
 
 allows ~3 Gbit/sec = 8 * 2^10 bits tv_usec * 2^(9-1) bits Packet Counter * 1500 bytes Ethernet MTU
 
 
-size XL - on 1280 MTU no need to separate INIT format:
+size L - on 1280 MTU no need to separate INIT format:
  
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSizeXL|OnP|Shared Key ID, 9 |    Packet Counter, 16 bits    |
+     |VerSizeXL|OnPat| Shared Key ID |    Packet Counter, 16 bits    |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSL|M|               Connection Verification Tag               |
+     |Reservd|CTagLen|              tv_sec, low 24 bits              |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |                     tv_sec, full 32 bits                      |
+     |ServInstNum|FEC N/Wr/La|         tv_usec, full 20 bits         |
   12 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |ServInstNum|FEC N/Wr/La|           tv_usec, 20 bits            |
+     |TSL|M/CRule|            Connection Verification Tag            |
   16 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      .        Nonce, optional, present / defined by Key Algo         .
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -6369,20 +6554,20 @@ size XL - on 1280 MTU no need to separate INIT format:
 this is exactly 1440 byte MSS on IPv4: 1472 UDP - 16 header - 16 HMAC,
 with header used as nonce
 
-size XXL - for MTU >= 1500:
+size XL - for MTU >= 1500:
  
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSizXXL|OnP|L|Packet Counter Wrap|FEC Number |   Reserved    |
+     |VerSizeXL|OnPat|L|Pkt Counter Wrap |FEC Number |   Reserved    |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSL|M|               Connection Verification Tag               |
-   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |                     tv_sec, full 32 bits                      |
+   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     | Shared Key ID, 12 bits|         tv_usec, full 20 bits         |
   12 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     | Shared Key ID, 12 bits|           tv_usec, 20 bits            |
+     |ServInstNum|           Packet Counter, full 26 bits            |
   16 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |ServInstNum|             Packet Counter, 26 bits               |
+     |TSL|M/CTLen|             Connection Verification Tag           |
   20 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      .        Nonce, optional, present / defined by Key Algo         .
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -6783,12 +6968,11 @@ bytes?
  1100aaaa bbbbbbbb cccccccc                            - 20
  1101aaaa bbbbbbbb cccccccc dddddddd                   - 28
  1110aaaa bbbbbbbb cccccccc dddddddd eeeeeeee          - 36
- 1111aaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff - 42
+ 1111aaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff - 44
 
  0..159
  101aaaaa bbbbbbbb                             - 13
- 1100aaaa bbbbbbbb                             - +12 = ?? total
- 1101aaaa bbbbbbbb cccccccc                    - 20
+ 110aaaaa bbbbbbbb cccccccc                    - 21
  1110aaaa bbbbbbbb cccccccc dddddddd           - 28
  1111aaaa bbbbbbbb cccccccc dddddddd eeeeeeee  - 36
 
