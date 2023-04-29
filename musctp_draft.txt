@@ -5869,6 +5869,13 @@ TBD
 
 TODO переделать начисто
 
+TBD with using MSG_OOB for first part of message, that is, control data valid; MSG_EOR
+for last - is it possible to use single function for partial delivery
+receiving?
+TBD why offset be exactly 20 bits? that's only for periodical saving, but M_GET could be any?
+^ offset size is API question or move to section 4.2 ?
+
+
 10.2. Доступные для вызова пользователем функции muSCTP.
 
 10.2.1. Инициализация.
@@ -6957,6 +6964,40 @@ The LLVM documentation describes a field that uses 4-bit chunk, with each chunk 
    For example, integer value 17 is encoded as two nibbles 0xa7, and value 42
    is encoded as three nibbles 0xb14.
 
+
+ 0..9
+ 1010 bbbb cccc                           - 8
+ 1011 bbbb cccc dddd eeee                 - 16
+ 11aa bbbb cccc dddd eeee ffff gggg       - 26
+
+ 0..7
+ 10aa bbbb                                - 6
+ 110a bbbb cccc                           - 9
+ 1110 bbbb cccc dddd                      - 12
+ 1111 0bbb cccc dddd eeee                 - 15 in 20
+ 1111 10bb cccc dddd eeee ffff gggg       - 22 in 28
+ 1111 11bb cccc dddd eeee ffff gggg hhhh  - 26 in 32
+
+ 0..7
+ 1000 bbbb cccc                           - 8
+ 1001 bbbb cccc dddd                      - 12
+ 1010 bbbb cccc dddd eeee                 - 16
+ 1011 bbbb cccc dddd eeee ffff            - 20 in 24
+ 11aa bbbb cccc dddd eeee ffff gggg       - 26
+
+ 0..7
+ 100a bbbb                                - 5
+ 1010 bbbb cccc                           - 8
+ 1011 bbbb cccc dddd                      - 12
+ 11aa bbbb cccc dddd eeee ffff gggg       - 26
+
+ 0..9
+ 101a bbbb                                - 5
+ 1100 bbbb cccc dddd                      - 12
+ 1101 bbbb cccc dddd eeee                 - 16
+ 1110 bbbb cccc dddd eeee ffff            - 20
+ 1111 bbbb cccc dddd eeee ffff gggg       - 24
+
 ===
 
 bytes?
@@ -7112,7 +7153,13 @@ VarSextet:
  1110aa bbbbbb cccccc dddddd               - 20
  1111aa bbbbbb cccccc dddddd eeeeee        - 26
 
+NB: encoded form must not occupt more than 32 bits, for 32-bit implementations!
 
+ 0..35
+ 1001aa bbbbbb cccccc dddddd eeeeee        - 26 in 30
+ 1010aa bbbbbb cccccc                      - 14
+ 1011aa bbbbbb cccccc dddddd               - 20 in 24
+ 11aaaa bbbbbb                             - 10 in 12
 
 
 TODO
@@ -7345,6 +7392,37 @@ what the shit is HTTP/2:
    Each header block is processed as a discrete unit.  Header blocks
    MUST be transmitted as a contiguous sequence of frames, with no
   interleaved frames of any other type *or from any other stream*.
+
+
+crazy idea of splitting TSN to Block number + Offset or Length Left:
++ no limit to header now, even Chunk Type could be wide and once
++ 2^31 TSN in flight + 2^13 of block - match to max window size
++ no separate frag opt, natural way for routers to frag as in TCP v3 [IEN21]
+* split it separate layer, for routers and to have entire packet, not only TSN,
+  also for AUTH - coz when single frag ?
+- what will router do with Packet Counter for new frags?
+- it any way, it becomes per-path
+- if TSN, block size is limited so need to convert internal streams to blocks, too
+- big problem: how to SACK now? put offsets to packet vector? but it's limited
+: note that SACK unit must be per-packet or less - due to NAK possibility, and NAK is
+  due to stream windows and compression
+TBD somewhat possible if in SACK:
+       0                    0                     0               
+change 0 1 2 3 4 5 6 7  to  0 1 2 3 4 5 6 7  and  0 1 2 3 4 5 6 7    
+      +-+-+-+-+-+-+-+-+    +-+-+-+-+-+-+-+-+     +-+-+-+-+-+-+-+-+ 
+      |0|   Bitmap    |    |0 0|  Bitmap   |     |0 1|F|  Count  | 
+      +-+-+-+-+-+-+-+-+    +-+-+-+-+-+-+-+-+     +-+-+-+-+-+-+-+-+ 
+where F="first received", so when F=0 then Count is Pyramint5 "approx total bytes recv so far"
+and when F=1 then Count is "cumul fragment ack" in 1/32-ths of known chunk size
+- this is too small, cumul ack should be exact or else how to distinguish?
+- if divide pages into paragraphs (like SCHC tiles), then possible... allow page size 1K or more for hdr?
+- do it in SACK like BSD UFS/FFS block/fragment division?
+- still same problem: what if for 640 byte chunk tile is 10 b and MSS 39 b ? waste of space/pkt/time
+4 3 2 1 0 : in 3 bits, 5 frags could be described: last can't be first and
+  * * *     in max fize first is always first, no need spend val on it
+moreover, if pass length in first frag anyway, then "first" could be one of
+values instead of wasting bit
+- N + N/4 for 2 bits of first and 14 bits of length
 
 
 TODO
