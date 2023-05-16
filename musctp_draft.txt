@@ -382,6 +382,23 @@ in OpenSSL by months, if not years.
   название, эта проблема будет решена другим путем.
 
 TBD переименовать Verification, разобраться с Nfewnce, clarify "вместо портов"
+TBD a host-to-host problem - SCTP has ports:
+   o  SCTP association: A protocol relationship between SCTP endpoints,
+      composed of the two SCTP endpoints and protocol state information
+      including Verification Tags and the currently active set of
+      Transmission Sequence Numbers (TSNs), etc.  An association can be
+      uniquely identified by the transport addresses used by the
+      endpoints in the association.  Two SCTP endpoints MUST NOT have
+      more than one SCTP association between them at any given time.
+   B) "Z" shall respond immediately with an INIT ACK chunk.  The
+      destination IP address of the INIT ACK MUST be set to the source
+      IP address of the INIT to which this INIT ACK is responding.  In
+      the response, besides filling in other parameters, "Z" must set
+      the Verification Tag field to Tag_A, and also provide its own
+      Verification Tag (Tag_Z) in the Initiate Tag field.
+so what to do when no ports?
+TBD reflection problem for Key ID
+
 
   Номер ключа представляет собой аналог SPI из IPsec, то есть индекс
   использованных параметров шифрования - помимо собственно строки байт ключа,
@@ -593,6 +610,14 @@ RFC 3493
 
 TBD CBOR for address #6.9426([ protocol_name: tstr / bstr, address: any, * params: any ])
 and UDP port 9426 for tunnel "UDP-Example"
+- this must be a range ports to solve INIT/ACK problem
+  - how many enough, to 9444?
+    - 11264 seems longer available range and 0x2c00 easier for debug
+
+TBD MinimaLT https://cr.yp.to/tcpip/minimalt-20131031.pdf :
+* allows data in first packet given client's ephemeral public key in it and server key in DNS, so may be put a key into CBOR tagged address?
+* add puzzle as option to cookie?
+* MinimaLT rekeying is indistinguishable from new connection
 
 TBD better name than "tunnel" ?
 - "bearer" from TIPC ? "carrier" ?
@@ -671,8 +696,6 @@ TODO
      |TSL|M|               Connection Verification Tag               |
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      .    0/1/2/4 bytes - Transmission Sequence Number (TSN) Base    .
-     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     .           if A=1, then 4 bytes of body of AUTH option         .
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |   Options (if any) ...
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -2262,6 +2285,8 @@ TBD заменить Res/FracS на максимальную гранулярн�
      /     Padding (ignored), if underlying protocol requires so     /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+TBD 3 new bits in Initiate Tag? or not, if it is it's length?
 
   Format of INIT_ACK from server:
 
@@ -6769,6 +6794,8 @@ IPv4/IPv6 packet.
 TODO rewrite prev paragraph for different Tag length and also that port is
 unavoidable in INIT/ACK packets
 
+- also see RFC 8900 - e.g. ECMP and load balancers
+
    Following tradition of early TCP/IP, servers listen on odd ports and
    clients send from even ports. So in most compressed form, when H is 0,
    then Prt=01 is client to server packet, and Prt=10 is packet from server
@@ -6790,6 +6817,8 @@ TBD what NAT actions required if there ARE some ports?..
 
 TBD why server ports? Instance number is for that, just make flag to/from
 server and client port - then NAT is like for ICMP Echo/Reply
+- RFC 8900 Section 3.5 problem - do Connection Tag solve it?
+  - for new IP, also Section 3.8.3 Anycast problem
 
 TBD variable length timestamp / FEC fields ?
 
@@ -6844,9 +6873,9 @@ and INIT/ACK:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |Versi|1|TSL|T23|K|tv_us|PktCntr|           Checksum            |
+     |Versi|1|TSL|T23|K|   tv_usec   |           Checksum            |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |                         tv_sec, full                          |
+     |S|    Port     | tv_sec low 24 bits / Low 7 as Packet Counter  |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      .        Nonce, optional, present / defined if K=1 ...          .
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -6858,6 +6887,15 @@ and INIT/ACK:
      /         HMAC, optional, if K=1 - defined by Key Algo          /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   The "port" field is not a real port, but serves as identificator for
+   matching INIT packets and responses to them, just as if it would be
+   epehemeral port for each new connection in UDP. It is not needed in
+   normal operation (ConnectionTag is for this), and limits connection
+   speed between two hosts to 128 attempts per MSL.
+
+   The S flag is 1 when packet is from server (that is, INIT ACK), and
+   zero if it is INIT from client.
 
 TODO
 
@@ -6998,6 +7036,35 @@ The LLVM documentation describes a field that uses 4-bit chunk, with each chunk 
  1110 bbbb cccc dddd eeee ffff            - 20
  1111 bbbb cccc dddd eeee ffff gggg       - 24
 
+VarSextet combined?
+ 0..7
+ 10aa bbbb cccc                           - 10 in 12
+ 1100 bbbb cccc dddd eeee                 - 16 in 20
+ 1101 bbbb cccc dddd eeee ffff            - 20 in 24
+ 1111 xxbb                          8..19 - in 8
+ 1111 11bb cccc dddd eeee ffff gggg hhhh  - 26 in 32
+
+as ranges in byte?
+ 0..7
+ 1xxa bbbb                                - 6- not till end, 96 vals
+ 111x xxbb cccc dddd
+ 111x xxbb cccc dddd eeee                 - 14
+ 1111 11bb cccc dddd eeee ffff gggg hhhh  - 26 in 32
+
+ 0..9
+ 1010 11bb cccc dddd eeee ffff gggg hhhh  - 26 in 32
+ 1010 10bb cccc dddd eeee ffff gggg       - 22 in 28
+ 1010 0bbb cccc dddd eeee ffff            - 19 in 24
+ 1011 bbbb cccc dddd eeee                 - 16 in 20
+ 11aa bbbb cccc                           - 10
+
+ 0..9
+ 1010 aaaa                                - 10 + 16 = 26
+ 1011 00bb cccc dddd eeee                 - 14 in 20
+ 1011 01bb cccc dddd eeee ffff            - 18 in 24
+ 1011 10bb cccc dddd eeee ffff gggg       - 22 in 28
+ 1011 11bb cccc dddd eeee ffff gggg hhhh  - 26 in 32
+ 11aa bbbb cccc                           - 10
 ===
 
 bytes?
