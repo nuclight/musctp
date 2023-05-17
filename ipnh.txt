@@ -1,0 +1,623 @@
+   !!! very early raw draft!
+
+      IPnh: Internet Protocol's Next Hop / Network Hierarchy
+      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   The muSCTP protocol is mostly agnostic to underlying network layer
+   protocol, so this, assuming muSCTP is significantly deployed, allows
+   for changing to another IP version, not only IPv4 or IPv6 - something very
+   hard to do on traditional TCP/UDP which essentially hardcode suport if
+   either of two present versions.
+
+1. Introduction.
+
+   There is still need for newer version of IP protocol - IPv6 is not
+   satisfactory. IPv6 problems are real and remain real, see for example
+   Huawei's NewIP initiative.
+
+   IPv6, being a classic example of second-system effect (see F. Brooks'
+   "The Mythical Man-Month" book), in fact is an epic fail. On the time line
+   where entire Internet issued a new version if ubiquitous protocol, deployed
+   it and then disabled interoperation with old unsupporting clients, this
+   happened e.g. 4 times for SSL/TLS - but for the same quarter of century
+   IPv6 has failed to be deployed as just only one main version.
+
+   IPv6 has almost no benefits, just flaws. In fact, the only benefits are:
+
+   * easy autoconfiguration in some cases
+   * larger address space.
+
+   And the latter is in fact not benefit, as *EVERY* successor of IPv4 had to
+   have larger address space, IPv6 was just one candidate of IPng contest.
+
+   The biggest problem of IPv6 remains backwards compatibility - old IPv4 with
+   unmodified software cannot *transparently* speak to IPv6 hosts (NAT64
+   finally appearedm, but too late and solving just half of two directions).
+
+   The next big problem of IPv6 is Internet-of-Things (IoT) and mobile hosts.
+   Ironically, larger address space was intended just for these myriads of
+   devices, and yet it failed in practice - because of 1) fragmentation and 2)
+   larger header. See how - the quote from RFC 4944: 
+
+   | The MTU size for IPv6 packets over IEEE 802.15.4 is 1280 octets.
+   | However, a full IPv6 packet does not fit in an IEEE 802.15.4 frame.
+   | 802.15.4 protocol data units have different sizes depending on how
+   | much overhead is present [ieee802.15.4].  Starting from a maximum
+   | physical layer packet size of 127 octets (aMaxPHYPacketSize) and a
+   | maximum frame overhead of 25 (aMaxFrameOverhead), the resultant
+   | maximum frame size at the media access control layer is 102 octets.
+   | Link-layer security imposes further overhead, which in the maximum
+   | case (21 octets of overhead in the AES-CCM-128 case, versus 9 and 13
+   | for AES-CCM-32 and AES-CCM-64, respectively) leaves only 81 octets
+   | available.  This is obviously far below the minimum IPv6 packet size
+   | of 1280 octets, and in keeping with Section 5 of the IPv6
+   | specification [RFC2460], a fragmention and reassembly adaptation
+   | layer must be provided at the layer below IP.  Such a layer is
+   | defined below in Section 5.
+   |
+   | Furthermore, since the IPv6 header is 40 octets long, this leaves
+   | only 41 octets for upper-layer protocols, like UDP.  The latter uses
+   | 8 octets in the header which leaves only 33 octets for application
+   | data.  Additionally, as pointed out above, there is a need for a
+   | fragmentation and reassembly layer, which will use even more octets.
+
+   So, 6LoWPAN defines an ugly set of crutches for IPv6 on it - not surprising
+   that ZigBee (on same 802.15.4) is more successful.
+
+   And IPv6 is very bad at fragmentation - gateway to constrained segment
+   cannot just fragment packet, as it must behave like DF bit is always set...
+   Moreover, as NDN Fragmentation Memo states, de-facto bad fragmentation
+   support leads to "ossification" of IP packet size to common 1500 byte MTU,
+   while for future high-speed links it may be desirable to raise MTU for both
+   performance reasons and sequence number space limits shifting from byte
+   numbers to packet numbers.
+
+   Mobility is also not achieved - see https://apenwarr.ca/log/20170810 for
+   long discussion of mobility evolution, and that IPv6 Host Mobility suffers
+   from fundamental problem: latency, because of tunneling. The proposal on
+   that page for UUID-like sockets is somewhat too radical, however - while
+   muSCTP uses the same principle in Connection Tag, this could require
+   replacing all transport protocols to muSCTP instead of gradual transition.
+   So supporting older protocols by splitting single long identifier to host
+   part and L4 part may still be reasonable.
+
+   There are also other IPv6 problems, https://netch.livejournal.com/8262.html
+   may give some other examples. Amongst them, e.g. chain of header reduces
+   performance - one cannot just multiply second nibble like in IPv4 to get
+   payload offset - multiple cache line loads may be needed to traverse the
+   chain. Ironically, again, there were IPng proposals with variable address
+   length, which were ditched with "fixed length is faster to parse"...
+
+   Interestingly, that wasn't the first time of variable-length address idea:
+   TCP/IP version 3 [IEN-21] in 1978 already proposed addresses 1 to 15 bytes
+   length - which, if adopted, could save us all from NATs and IPv6 in the
+   first place...
+
+   So let's say final "NO!" to all opponents of variable-length addresses:
+   for Internet to be really mix of *different* networks this is a must.
+   Hardware producers blaming for performance must justify earning their
+   salary, that's their problem, not of all others. Moreover, hardware evolves
+   over the time more rapidly then protocols, so making assumptions about
+   hardware capabilities at the time of protocol designing is not far-sighted.
+
+   IPnh borrows ideas from Huawei's NewIP and IPng proposals which were
+   alternatives to IPv6: IPv7 [RFC 1475] and Pip [RFC 1621][RFC 1622]. It's
+   not surprising why Pip losed the contest to simpler proposals like SIPP:
+   Pip as-is is really too complex to implement, with all of it's routing
+   chains and even special servers for formatting Pip headers (violating
+   end-to-end Internet principle, is now considered bad). However, it has
+   many actual things, most notable mobility ID and same subscriber's part
+   under different porviders in hierarchy.
+
+2. Concepts and header.
+
+   Conceptually, IPnh tries to go radical: what if, for greatest extensibility
+   possible, we represent packet as JSON ? This would eliminate need for
+   newer IP versions for many decades, if not centuries! And possibility to
+   support non-host addressing modes, e.g. [Named data networking]...
+
+   Of course, this contradicts effective machine processing. And there are
+   at least two conflicting areas of machine processing already:
+   high-performance systems and constrained systems (like aforementioned
+   802.15.4). Thus, IPnh copes with it by having different forms for same
+   data.
+
+2.1. Overview of packet and main concepts.
+
+   IPnh packet has the following general structure:
+
+      +=====================================+
+      |                    |  Fixed Part    |
+      |   Initial Header   +----------------+
+      |                    |  Variable Part |
+      +=====================================+
+      | Fragment Descriptor (Balancer Part) |
+      +=====================================+
+      |                                     |
+      |             Options Part            |
+      |                                     |
+      +=====================================+
+      |                                     |
+      |                                     |
+      |               Payload               |
+      |                                     |
+      |                                     |
+      +=====================================+
+
+   As fragmentation is an important part of IPnh, there is special part in
+   packet if it is fragmented. To solve most of fragmentation problems
+   described in [RFC 8900], author has found that it is enough to repeat first
+   payload bytes in every fragment instead of putting them in just first
+   fragment only. This is the place where middleboxes like e.g. firewalls and
+   load balancers will look for them like if were beginning of payload, so
+   it's also called "balancer part" on a figure above.
+
+2.1.1. Host ID: fragmentation and mobility.
+
+   Unlike Pip, where addresses were something second-class and used just for
+   routing and first-class citizens were IDs, IPnh reverses this: due to need
+   for compatibility with legacy addressing schemes, main focus is still
+   on addresses. However, Host IDs - Source ID and Destination ID - remain an
+   integral part of IPnh. Fragmentation, load balancing and host mobility all
+   deal with Host IDs instead of addresses, like them would be primary
+   identificators for hosts. Moreover, pseudoheader for TCP, UDP and other
+   upper-layer protocols consists of Host IDs, so neither checksum
+   recalculation will be needed when mobile host changes it's address, nor
+   firewalls / load balancers need to lose their state.
+
+   It is tempting to take EUI-64 as natural identifier for Host to be globally
+   unique for mobility. However, one of IPv6 design flaws was exactly this:
+   take MAC address as part of IPv6 and have privacy / tracking problems.
+
+   So security lesson has been learned, and now Host ID is either:
+
+   * explicitly selected by host and present in packet, or
+   * absent in packet and calculated as hash sum from address.
+
+   Note that transit routers do not need to calculate these hashes, just as
+   they don't need to look into payload, even if such a router fragments
+   packet, so performance here is not affected. Only end hosts and
+   refragmenting instances like firewalls or load balancers need to - however,
+   fast hash function do not add much for ability to seriously reduce latency
+   for mobile hosts, so this is good trade-off.
+
+2.1.2. Addresses: hierarchy, compatibility, extensibility.
+
+   One of the IPnh goals is not only simplify address space and routing
+   management by hierarchies, but also provide a "natural" way for presenting
+   addresses of different types (become really inter-net again), including
+   IPv4 and IPv6 addresses in such manner that hosts with such addresses and
+   IPnh hosts can communicate without need dual-stack (triple-stack, etc.)
+   support in each host, that is, without modification of hosts' software
+   (except may be easy little parts like DNS resolver).
+
+TBD which variant to take for compatible v4/6 ? tag 52/54/260 to string?
+top-level in hier?
+
+
+
+
+
+Pip:
+===
+   For instance, if two neighbor routers have Pip Addresses 1.2.3,4 and
+   1.2.8,9.14 respectively, then they share levels 0 and 1, and are
+   different at levels below that.  (0 is the highest level, 1 is the
+   next highest, and so on.) As a general rule, these two routers
+   exchange level 0, level 1, and level 2 routing information, but not
+   level 3 or lower routing information.  In other words, both routers
+
+   In this case, 1.2.8,9.14 does not need to know about level 2 or level
+   1 areas in the provider (that is, it does not need to know about
+   1.2.4..., 1.2.5..., or 1.3..., 1.4..., and so on).  Thus, 1.2.8,9.14
+   should be configured to inform 1.2.3,4 that it does not need level 1
+   or 2 information.
+
+
+RFC 3649:
+   In order for best-effort flows to safely start-up faster than slow-
+   start, e.g., in future high-bandwidth networks, we believe that it
+   would be necessary for the flow to have explicit feedback from the
+   routers along the path.  There are a number of proposals for this,
+   ranging from a minimal proposal for an IP option that allows TCP SYN
+   packets to collect information from routers along the path about the
+   allowed initial sending rate [J02], to proposals with more power that
+   require more fine-tuned and continuous feedback from routers.  These
+===
+
+
+TBD
+
+2.2. Common parts of all headers.
+
+   All IPnh header formats have first two bytes in common:
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+   |Version|  IHL  | HCver |FrL|ECN| 
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+  Version:  4 bits
+
+    The Version field indicates the format of the internet header.
+    For this draft, let the version be 8 (may be changed by IANA later).
+
+  IHL:  4 bits
+
+    Initial Header Length, in units depending on HCver.
+
+  HCver:  4 bits
+
+    This is not a minor version, but a Header Compression scheme combined with
+    scheme version (cf. 6LoWPAN's HC1, HC2, IPHC, NHC...). All variants of
+    HCver are still the same IPnh version header and consist of conceptually
+    the same data, but represented in different forms. For example, a gateway
+    between "big" Internet and constrained segment can statelessly transform
+    packet from one header format from another.
+
+    This drafts currently defines HCver 0 and 1.
+
+  FrL:  2 bits
+
+    Length of Fragment Descriptor, in units depending on HCver.
+
+  ECN:  2 bits
+
+    Explicit Congestion Notification bits, placed at the same place and having
+    the same meaning as in IPv4 header.
+
+TBD
+
+2.2.1. Coloring word.
+
+   In some header variants a "coloring word" (like "green traffic" or
+   "red traffic") could be placed.
+
+   This word is usually last and optional, it is present only if IHL is large
+   enough AND that space is not consumed by addresses, IDs and short options.
+   If it is not present, it MUST considered as containing all-zeroes. Meaning
+   of fields is the same as Flow Label and Traffic Class in IPv6, except that
+   it's "Traffic Class" expanded to 12 bits and divided into two fields: one
+   coloring for technical needs (6 bits of traditional DSCP) and one (new)
+   field for non-technical (legal) coloring.
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |    DSCP   |R| GovMark |           Flow Label                  |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+  Traffic Class and Flow Label:  6 bits.
+
+    Traffic Class does not contain ECN and reserved bits are meant for aid in
+    load balancing also, e.g. it may be expanded to full 12 bits instead of
+    just 6 bits of current DSCP.
+
+  R:  1 bit
+
+    Reserved for future use, MUST be 0 on send and ignored on receipt.
+
+  GovMark:  6 bits.
+
+    Government or Local Policy Mark is meant as a compromise between
+    conflicting legal and moral requirements. While Internet always was been
+    for global connectivity and against censorship, and that was supported by
+    using cryptographic means to prevent e.g. tampering of the packet, there are
+    still valid cases when middleboxes could something to packets instead of
+    dropping (philosophically like ECN field added instead of dropping) to let
+    end-system (or near-end system) to decide. Most notable example of this is
+    "adult content" where for many people it is normal but parents may want to
+    enable filtering which may be infeasible to do (on the Internet scale) on
+    end children's device. In case of government-level censoprship, using
+    cryptography and other hiding tools usually leaves the only choice for
+    censors to block traffic completely, an "all-or-nothing", because e.g.
+    HTTPS do not allow them to add "COURT DECIDED THIS IS FAKE NEWS SITE"
+    Big Banner or something like that. We believe that adding such
+    outside-of-content markers could reduce level of censorship blocks in the
+    world.
+
+    A big enterprise network could also make benefit on simplification access
+    rules by marking traffic by e.g. access levels, thus this field could also
+    be used not only Government but as Local Policy Mark, too. This is in
+    spirit of early days of IP when some bits of TOS field where for
+    confidentiality level.
+
+    This draft do not specify values to this field except that zero (0) MUST
+    mean absence of any legal/policy mark, and decimal 24 is RECOMMENDED for
+    "adult" traffic (so that with default traffic class 0x018 on the wire could
+    be easily identified as not for children under 18 years).
+
+  Flow Label:  20 bits.
+
+    Same as in IPv6.
+
+2.3. Optimized for performance header: HCver=0.
+
+   This is variant of header intended to be most common, in "normal"
+   Internet - 0 as "Old" / "Optimized" for performance. It can be seen that
+   some fields are at the same place as in IPv4 header, with same meaning.
+
+   Here, length unit, word, is defined as 32 bits.
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Version|  IHL  | HCver |FrL|ECN|Flags|Reserved |NHL| DIL | SIL |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Options Length |  DAL  |  SAL  |          Total Length         |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Hop Limit (TTL)|    Protocol   |         Header Checksum       |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   .   Next Hop / Forward Route Identifier - optional, NHL words   .
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   \                                                               \
+   /     Destination address (variable length, DAL elements)       / 
+   \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   \                                                               \
+   /        Source address (variable length, DAL elements)         / 
+   \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   .           Destination Host ID - optional, DIL words           .
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   .             Source Host ID - optional, SIL words              . 
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   \                                                               \
+   /                Every fragment routing options                 /
+   \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Coloring word                         |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+
+  IHL:  4 bits
+
+    Initial Header Length is in 32-bit words, like IPv4, but to obtain actual
+    length, 2 is added. That is, maximum length of header is 68 bytes, and IHL
+    value MUST NOT be zero or one - these reserved for future use.
+
+  Flags and Reserved:  8 bits
+
+    TBD
+
+  NHL:  2 bits
+
+    Length of Next Hop field in 32 bit words. May be 0 for absence of Next Hop
+    field, the most common exepcted case, or 1 or 2, for 32-bit of 64-bit
+    Next Hop. Value 3 is currently reserved and MUST NOT be used.
+
+  DIL and SIL: 3 bits each
+
+    Destination Host ID length and Source Host ID length, in words. Actually,
+    not all values are for length - some say that there is no corresponding ID
+    in packet, and this is number of hash algo to calculate it:
+
+    0 - no ID in packet, hash algorithm 0
+    1 - no ID in packet, hash algorithm 1
+    2 - no ID in packet, hash algorithm 2
+    3 - no ID in packet, hash algorithm 3
+    4 - no ID in packet, hash algorithm 4
+    5 - Reserved
+    6 - Host ID present, 2 words (64 bits)
+    7 - Reserved
+
+  Flags:  4 bits
+
+    TBD
+
+  Options Length:  4 bits
+
+    Length of options, in 32-bit words. Thus, options may have length from
+    0 to 1020 bytes.
+
+  DAL and SAL:  4 bits each
+
+    Destination and Source addresses length, in elements.
+
+  Total Length:  16 bits
+
+    Length of this IP datagram in bytes, as in IPv4.
+
+  Hop Limit (TTL), Protocol, Header Checksum
+
+    See IPv4.
+
+  Coloring word:  last 32 bits.
+
+    For Traffic Class and Flow Label, optional, see section on coloring word.
+
+  Next Hop / Forward Route Identifier:  absent, 4 or 8 bytes
+
+    This optional field, if present, contains information to be interpreted by
+    next router *instead* of Destination Address, and possibly other
+    variable-length fields/options (at the discretion of that router). Thus,
+    if present, it is first in packet at fixed offset, facilitating
+    forwarding plane performance. It is intended to be used like described in
+    Section 3.4 of [RFC 1475], MPLS-like or instead of MPLS.
+
+    This specification does not constrain how this field to be implemented,
+    but possible suggestions could include even offset of routing entry in FIB
+    memory region, along with some error checking bits.
+
+    Note that, despite of name, this value is not restricted to be hop-by-hop
+    or changed at every hop, so chain of routers in area from entry to exit
+    could all use single value in this field, making variable-length
+    addressing not slower, but even faster than traditional CIDR.
+
+2.3.1. Addresses.
+
+   For compactness, common CBOR types are optimized into custom format.
+
+   First bits of element a
+
+ 0..159
+ 101aaaaa bbbbbbbb                                     - 13
+ 110aaaaa bbbbbbbb cccccccc                            - 21
+ 1110aaaa bbbbbbbb cccccccc dddddddd                   - 28
+ 11110aaa bbbbbbbb cccccccc dddddddd eeeeeeee          - 35
+ 111110aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff - 42
+
+ 0..191
+ 110aaaaa bbbbbbbb                                                       - 13
+ 1110aaaa bbbbbbbb cccccccc                                              - 20
+ 11110aaa bbbbbbbb cccccccc dddddddd                                     - 27
+ 111100aa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 34
+ 111101aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 42
+
+ F0 - 
+ F1 -
+ F2 -
+ F3 -
+ F4 -
+ F5 -
+ F6 -
+ F7 -
+ F8 -
+ F9 -
+ FA - 4 bytes, CBOR 0x1a
+ FB - 8 bytes, CBOR 0x1b
+ FC - tag as comma (mnem: 0x2c)
+ FD - Reserved for future use
+ FE - escape to one CBOR element (though may be multiple tags)
+ FF - escape to CBOR till rest of address
+
+=== http://www.employees.org/~ravir/cbor-network.txt :
+IPv4 Address is stored as 4 bytes.
+IPv6 Address is stored as 16 bytes.
+MAC  Address is stored as 6 bytes.
+
+Tag value of 260 is used to mark that the following byte string data
+is either a IPv4 address or IPv6 address or MAC address (depending on
+the length). The addresses are stored in binary values in the network byte order.
+
+Examples:
+d9 0104 44 c00a0a01     --> IPv4 address 192.10.10.1
+d9 0104 46 0123456789ab --> MAC address 01:23:45:67:89:ab
+d9 0104 50 20010db885a3000000008a2e03707334 --> IPv6 address 2001:db8:85a3::8a2e:370:7334
+===
+
+
+2.3.2. Fragment Descriptor.
+
+   In case packet is fragmented, FrL defines length of Fragment Descriptor of
+   the following format:
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   \                                                               \
+   /   Copy of first fragment payload's first 0, 1, or 2 words     /
+   \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |         Identification        |Flags|      Fragment Offset    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+TBD
+
+
+2.4. CBOR Header: HCver=0xC.
+
+   This is almost full "everything in CBOR" version, except of fields which
+   can't be expressed in CBOR - e.g. length, checksum and fragmenting of CBOR
+   itself. Unfortunately, this means that fragmentation must be Hop-by-Hop,
+   as in NDN: that is, fragments don't travel network but are reassembled by
+   each next hop, and each hop refragments packet when forwarding it to next
+   link (given that's link MTU). While this scheme certainly has benefits as
+   described in [NDN-FRAG], it also has drawbacks. Thus, an attempt was made
+   to put a little more non-CBOR fields - that is, use Next Hop from
+   traditional format to make it possible for reasembly/refragmening on just
+   some (presimable border) routers, not all of them. This also means presence
+   of Traffic Class / Flow Label for them, where, again, Flow Label is a part
+   of fragment identifier.
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Version|  IHL  | HCver |FrL|ECN| Initial/Frag Header Checksum  |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Reserved | NHL |                  Total Length                 |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   .   Next Hop / Forward Route Identifier - optional, NHL words   .
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Coloring word                         |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   \                                                               \
+   /               Fragment Descriptor, if fragmented              /
+   \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   \                                                               \
+   /             Either Fragment or Unfragmented part              /
+   \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   Also, to reduce size, some form of generic CBOR compression (not
+   specialized to IP), where some of such compressors may make benefit of
+   using some "dictionary", either in zlib style or by well known
+   IANA-established means.
+
+TBD
+
+2.4.1. Unfragmented part.
+
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Compr Method Id|Reservd|     CBOR Header Length                |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                     CBOR Header Checksum                      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                      CBOR Dictionary ID                       |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   \                                                               \
+   /                         CBOR Header                           /
+   \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   \                                                               \
+   /                           Payload                             /
+   \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+2.4.2. Fragment Descriptor.
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                           Identification                      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                  Fragment Offset or Total Length              |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+TBD
+
+
+
+
+TBD
+
+IPv4 header for reference:
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Version|  IHL  |Type of Service|          Total Length         |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |         Identification        |Flags|      Fragment Offset    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |  Time to Live |    Protocol   |         Header Checksum       |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                       Source Address                          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Destination Address                        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                    Options                    |    Padding    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
