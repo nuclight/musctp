@@ -766,6 +766,8 @@ rule does not need CBAR but can be simple CBOR: uint=copy N bytes from pkt,
 bstr=add literal bytes, negative int for bits?
   TBD full BPF for bit fields? but this is not simple for constrained devices...
 
+TBD split Connection Tag to separate Host ID, if IPnh provides us with it
+
   Поле TSN имеет то же значение, что и в SCTP - номер блока данных при передаче
   данных с подтверждением, имеет полный "виртуальный" размер 32 бита, и
   подчиняется тем же правилам арифметики по модулю 32, что и в TCP и в SCTP.
@@ -5780,6 +5782,39 @@ RFC 4821:
    See Section 4 for details.  The simplest estimate of the interval to
    the next congestion event is the same number of round trips as the
    current congestion window in packets.
+
+
+RFC 4423:
+   7.  If we add an additional layer, would it make the address list in
+       Stream Control Transmission Protocol (SCTP) unnecessary?
+          Yes.
+-- but it still may be useful for several paths *at the same time* as SCTP at
+that time had just failover instead of Multilink
+
+   9.  What would the resolution mechanisms be, or what characteristics
+       of a resolution mechanisms would be required?
+          For most purposes, an approach where DNS names are resolved
+          simultaneously to HIs and IP addresses is sufficient.
+          However, if it becomes necessary to resolve HIs into IP
+          addresses or back to DNS names, a flat resolution
+          infrastructure is needed.  Such an infrastructure could be
+          based on the ideas of Distributed Hash Tables, but would
+          require significant new development and deployment.
+-- well, that's a problem...
+
+   There has been considerable bad experience with distributed ACLs that
+   contain public-key-related material, for example, with Secure SHell
+   Protocol (SSH).  If the owner of a key needs to revoke it for any
+   reason, the task of finding all locations where the key is held in an
+   ACL may be impossible.  If the reason for the revocation is due to
+   private key theft, this could be a serious issue.
+ 
+   A host can keep track of all of its partners that might use its HIT
+   in an ACL by logging all remote HITs.  It should only be necessary to
+   log responder hosts.  With this information, the host can notify the
+   various hosts about the change to the HIT.  There has been no attempt
+   to develop a secure method to issue the HIT revocation notice.
+
 
 
 /=== quotes from other protocols ===

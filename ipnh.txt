@@ -11,6 +11,8 @@
 
 1. Introduction.
 
+TBD incorporate Section 1 of https://www.ietf.org/archive/id/draft-omar-ipv10-12.txt
+
    There is still need for newer version of IP protocol - IPv6 is not
    satisfactory. IPv6 problems are real and remain real, see for example
    Huawei's NewIP initiative.
@@ -28,7 +30,7 @@
    * larger address space.
 
    And the latter is in fact not benefit, as *EVERY* successor of IPv4 had to
-   have larger address space, IPv6 was just one candidate of IPng contest.
+   have larger address space, IPv6 was just one candidate at IPng contest.
 
    The biggest problem of IPv6 remains backwards compatibility - old IPv4 with
    unmodified software cannot *transparently* speak to IPv6 hosts (NAT64
@@ -181,6 +183,13 @@
    fast hash function do not add much for ability to seriously reduce latency
    for mobile hosts, so this is good trade-off.
 
+TODO IPv6 mobility is triangular in best case - fundamental latency proble
+
+TBD comparison with HIP (Host Identity Protocol), RFC 4423
+and with LISP (Locator/ID Separation Protocol), RFC 6830
+
+TBD draft-herbert-intarea-ila-01 : anycast, SIR prefix, ILA domain
+
 2.1.2. Addresses: hierarchy, compatibility, extensibility.
 
    One of the IPnh goals is not only simplify address space and routing
@@ -235,7 +244,7 @@ TBD
     0                   1
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
-   |Version|  IHL  | HCver |FrL|ECN| 
+   |Version|  IHL  | HCver |Frg|ECN|
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
 
   Version:  4 bits
@@ -258,9 +267,19 @@ TBD
 
     This drafts currently defines HCver 0 and 1.
 
-  FrL:  2 bits
+  Frg:  2 bits
 
-    Length of Fragment Descriptor, in units depending on HCver.
+    Whether Fragment Descriptor is present or unfragmented, and fragment type:
+
+    00 - unfragmented datagram
+    01 - first fragment
+    10 - last fragment
+    11 - "middle" (neither first nor last) fragment
+
+    Note that this is in fact bits B(egin) and E(nd) inverted to make simple
+    test for presence of Fragment Descriptor by checking field to be non-zero.
+    Every Header Compression scheme MAY define different Fragment Descriptor
+    formats for these 3 combinations.
 
   ECN:  2 bits
 
@@ -343,7 +362,7 @@ TBD
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |Version|  IHL  | HCver |FrL|ECN|Flags|Reserved |NHL| DIL | SIL |
+   |Version|  IHL  | HCver |Frg|ECN|Flags|Reserved |NHL| DIL | SIL |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |Options Length |  DAL  |  SAL  |          Total Length         |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -384,13 +403,26 @@ TBD
     value MUST NOT be zero or one - these reserved for future use.
 
   Flags and Reserved:  8 bits
+===
+      o The GUE header includes a header length field. This allows a
+        network node to inspect an encapsulated packet without needing
+        to parse the full encapsulation header.
 
+      o The flags-field model facilitates efficient implementation of
+        extensibility in hardware.
+
+        For instance a TCAM can be use to parse a known set of N flags
+        where the number of entries in the TCAM is 2^N.
+
+        By comparison, the number of TCAM entries needed to parse a set
+        of N arbitrarily ordered TLVS is approximately e*N!.
+===
     TBD
 
   NHL:  2 bits
 
     Length of Next Hop field in 32 bit words. May be 0 for absence of Next Hop
-    field, the most common exepcted case, or 1 or 2, for 32-bit of 64-bit
+    field, the most common expected case, or 1 or 2, for 32-bit of 64-bit
     Next Hop. Value 3 is currently reserved and MUST NOT be used.
 
   DIL and SIL: 3 bits each
@@ -471,6 +503,9 @@ TBD
  111100aa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 34
  111101aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 42
 
+TODO must be 0xe0 for same 28 bits as IPv4 Class D Multicast
+
+
  F0 - 
  F1 -
  F2 -
@@ -540,7 +575,7 @@ TBD
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |Version|  IHL  | HCver |FrL|ECN| Initial/Frag Header Checksum  |
+   |Version|  IHL  | HCver |Frg|ECN| Initial/Frag Header Checksum  |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |Reserved | NHL |                  Total Length                 |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
