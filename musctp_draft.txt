@@ -723,18 +723,6 @@ e.g. 64 bits of Message ID split into 32 bits of time in second, 20 bits of
 milliseconds, 10 bits stream and 2 bit flags - this could be parsed by
 processing two 32-bit words
 
-what         | non-constrained | constrained
-000 non-zero | 4 bytes         | 4 bytes, A=0
-001 any      | 5 bytes         | 4 bytes, A=1
-010 any      | 6 bytes         | 5 bytes, A=0
-011 any      | 7 bytes         | 5 bytes, A=1
-100 non-zero | 8 bytes         | 6 bytes, A=0
-101 any      | Reserved        | 6 bytes, A=1
-110 any      | Reserved        | 7 bytes, A=0
-111 any      | Reserved        | 7 bytes, A=1
-000 zero     | 4 bytes, indicate INIT packet
-100 zero     | 4 bytes, indicate error flag (ABORT packet)
-
 TBD 7 is too much for constrained, 6 max is enough, and only in c2s direction
 
 TBD combine with M so M=1100 and above?
@@ -767,6 +755,7 @@ bstr=add literal bytes, negative int for bits?
   TBD full BPF for bit fields? but this is not simple for constrained devices...
 
 TBD split Connection Tag to separate Host ID, if IPnh provides us with it
+- and for constrained sizes even Host IDs Sum instead of full pair
 
   Поле TSN имеет то же значение, что и в SCTP - номер блока данных при передаче
   данных с подтверждением, имеет полный "виртуальный" размер 32 бита, и
@@ -2320,13 +2309,13 @@ TBD 3 new bits in Initiate Tag? or not, if it is it's length?
         2                |2 1            |    1      |
         9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-       |                   Reserved              |MaxCT|C|Too|S|TEL|
+       |                   Reserved              |MaxHI|C|Too|S|TEL|
        +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
     * C, 1 bit - Clean Start as in MQTT
     * Too - how many seconds "too much" is, as 2^(Too+3), that is, 3 means 64 sec
-    * MaxCT - maximum length of Connection Tag supported by client, in TBD-bit
-      words, 0 for just first 26 bits
+    * MaxHI - maximum length of Host IDs supported by client, in TBD-bit
+      words
 
   The flags from server:
   (note bits numbering from right)
@@ -6494,7 +6483,7 @@ UDP Size M in Established state (usual packet):
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSizM|0|OnPat|FEC/W/L|tv_usec Hi 10 bits |T| Packet Counter  |
+     |VerSizM|0|OnPat|FEC/W/L|tv_usec Hi 10 bits |H| Packet Counter  |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSL|M/CRule|           Connection Verification Tag             |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -6511,9 +6500,7 @@ UDP Size M in Established state (usual packet):
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-T - if Connection Tag has 5 byte length
-
-TBD what if more bits for OnPath? then swap tv_[u]sec, ShKeyID=7 bits
+H - has Host IDs Sum 2 bytes
 
 FEC Num/Wrap/Last:
 - 0      - packet is not under FEC
@@ -6551,11 +6538,11 @@ INIT/ACK-packet:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSizM|1|lgMSS|tv_sec low 24 bits / Low 6 as Packet Counter Hi|
+     |VerSizM|1|lgMSS|tv_sec low 24 bits / Low 7 as Packet Counter Hi|
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSL|T23|K|PkCLo|                   Nonce,                      \
-   8 +-+-+-+-+-+-+-+-+                 optional,                     /
-     /                            present / defined if K=1 ...       \
+     |TSL|T23|K|H|PLo|Host IDs Sum, optional (if H=1)|    Nonce,     \
+   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+  optional,    /
+     /                  present / defined if K=1 ...                 \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
      /                    Actual INIT packet data                    /
@@ -6595,22 +6582,30 @@ allows ~3 Gbit/sec = 8 * 2^10 bits tv_usec * 2^(9-1) bits Packet Counter * 1500 
 
 
 size L - on 1280 MTU no need to separate INIT format:
- 
+
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |VerSizeXL|OnPat| Shared Key ID |    Packet Counter, 16 bits    |
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |Reservd|CTagLen|              tv_sec, low 24 bits              |
-   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |ServInstNum|FEC N/Wr/La|         tv_usec, full 20 bits         |
-  12 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      |TSL|M/CRule|            Connection Verification Tag            |
+   8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |Reservd|DIL|SIL|              tv_sec, low 24 bits              |
+  12 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |ServInstNum|FEC N/Wr/La|         tv_usec, full 20 bits         |
   16 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |                                                               |
+     .           Destination Host ID - optional, DIL words           .
+     |                                                               |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |                                                               |
+     .             Source Host ID - optional, SIL words              .
+     |                                                               |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      .        Nonce, optional, present / defined by Key Algo         .
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
-     /                    Actual INIT packet data                    /
+     /             Actual packet data, probably encrypted            /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
@@ -6626,20 +6621,28 @@ size XL - for MTU >= 1500:
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |VerSizeXL|OnPat|L|Pkt Counter Wrap |FEC Number |   Reserved    |
+     |VerSizeXL|OnPat|L|Pkt Counter Wrap |FEC Number |Reservd|DIL|SIL|
    4 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |                     tv_sec, full 32 bits                      |
+     |TSL|M/CRule|             Connection Verification Tag           |
    8 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     | Shared Key ID, 12 bits|         tv_usec, full 20 bits         |
+     |                     tv_sec, full 32 bits                      |
   12 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |ServInstNum|           Packet Counter, full 26 bits            |
+     | Shared Key ID, 12 bits|         tv_usec, full 20 bits         |
   16 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     |TSL|M/CTLen|             Connection Verification Tag           |
+     |ServInstNum|           Packet Counter, full 26 bits            |
   20 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |                                                               |
+     .           Destination Host ID - optional, DIL words           .
+     |                                                               |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |                                                               |
+     .             Source Host ID - optional, SIL words              .
+     |                                                               |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      .        Nonce, optional, present / defined by Key Algo         .
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
-     /                    Actual INIT packet data                    /
+     /             Actual packet data, probably encrypted            /
      \                                                               \
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      \                                                               \
@@ -6711,8 +6714,8 @@ NOTE Dif is not needed in non-INIT packets as Tags are different
      \                                                               \
      /        MAC, optional, present / defined by Key Algo           /
      \                                                               \
-     /                                               +-+-+-+-+-+-+-+-+
-     \                                               |PWrap|ExtPadLen|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |         Host IDs Sum, 20 bits         |Pkt Cntr Wrap|ExtPadLen|
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 from server:
@@ -6726,6 +6729,8 @@ from server:
 TBD
   S - Sign of Delta
   Server Time = Packet Stamp + Delta*(-1)^S, in both directions
+
+TBD an INIT packet needs port and HIS reflect
 
   INIT/ACK:
       0                   1                   2                   3
@@ -7525,6 +7530,7 @@ and when F=1 then Count is "cumul fragment ack" in 1/32-ths of known chunk size
 moreover, if pass length in first frag anyway, then "first" could be one of
 values instead of wasting bit
 - N + N/4 for 2 bits of first and 14 bits of length
+- need frag number in NAK also?
 
 
 TODO

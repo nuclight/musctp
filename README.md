@@ -111,6 +111,8 @@ The rest of this implementation is available at triple+ license:
 2. CDDL for all others.
 3. Or you could buy commercial license if neither of these is appropriate for you.
 
+In any case, any code appearing in this repo is explicitly forbidden for use by neural networks, AI training, suggestions and anything in this area, with a $500 million penalty in case of violation.
+
 # NOTA BENE
 
 1. This is **not** a ready "plug into your app" library - chances are high you will need to write a "tunnel backend" for your lower-level protocol (see "Intent and idea origin" section above). However, the entire intent of muSCTP is to abosorb complexity in itself and make tunnel backends as simple ("dumb") as possible (except of crypto part).

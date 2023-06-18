@@ -194,7 +194,7 @@ TBD draft-herbert-intarea-ila-01 : anycast, SIR prefix, ILA domain
 
    One of the IPnh goals is not only simplify address space and routing
    management by hierarchies, but also provide a "natural" way for presenting
-   addresses of different types (become really inter-net again), including
+   addresses of different types (become really *inter*-net again), including
    IPv4 and IPv6 addresses in such manner that hosts with such addresses and
    IPnh hosts can communicate without need dual-stack (triple-stack, etc.)
    support in each host, that is, without modification of hosts' software
@@ -203,9 +203,33 @@ TBD draft-herbert-intarea-ila-01 : anycast, SIR prefix, ILA domain
 TBD which variant to take for compatible v4/6 ? tag 52/54/260 to string?
 top-level in hier?
 
+top-level: mb 4. for IPv4, 6 for IPv6, 11..17 for telephone codes like +7... ?
+
+- variant: shortcuts for 4 one-byte elements and 8 two-byte elements
+  so 4.200.200.200.200 for IPv4 and 34.200.200.200.200 generic both could
+  take 6 bytes; same for MAC / EUI-64 ?
 
 
+a file system metaphor
+  /usr/share
+  /usr/src
+  /builder01/src/
+  /builder02/src/
 
+Host id as st_dev + inode?
+
+with LDAP, there is no more file and directory distinction, also ReiserFS
+
+TBD LDAP has multi-valued RDN, should we generalize it?
+- seems not, "," is enough, other is not simple to implement
+
+. as 0, .. as 1 and ../.. as 2 ?
+**/ for anycast?
+
+it is tempting to mix layers having addresses of sockets, but Lindy Effect
+
+HIP says about mixing two layers, address and identuty, but itself ironically mixes
+identifier with crypto key
 
 Pip:
 ===
@@ -233,6 +257,12 @@ RFC 3649:
    allowed initial sending rate [J02], to proposals with more power that
    require more fine-tuned and continuous feedback from routers.  These
 ===
+
+RFC 950:
+   | This is a significant advantage, that given the Internet
+   | address no additional information is needed for an
+   | implementation to determine if two addresses are on the same
+   | subnet.
 
 
 TBD
@@ -304,7 +334,7 @@ TBD
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |    DSCP   |R| GovMark |           Flow Label                  |
+   |    DSCP   |R|L/GovMark|           Flow Label                  |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
   Traffic Class and Flow Label:  6 bits.
@@ -439,6 +469,9 @@ TBD
     5 - Reserved
     6 - Host ID present, 2 words (64 bits)
     7 - Reserved
+
+    It is not yet decided will 5 be for hash 5 or 32-bit ID, and whether 7 be
+    for 3 or 4 words.
 
   Flags:  4 bits
 
