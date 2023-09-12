@@ -733,6 +733,76 @@ as in bytes, no header area
 
 TODO
 
+=========== Two-pass Format: LZF + Atoms =====
+
+   External format: use Compress::LZF as is
+
+   Internal pass: for CBOR, use unused codes 28..30 in each Major Type. For
+   integers, it's shorter one (e.g. 3-byte), for each string type, prefix it
+   with atom length as prescribed by CBOR, for tags, put common like
+   stringref, and in special, make generic escape mechanism:
+
+   e.g. 0xfc to escape one byte
+   0xfd - extended escape, and e.g. for atoms in middle of strings
+
+TBD what extended escapes?
+
+TBD if 3 codes in each type, are 768 atoms enough? may reuse from map/array,
+but isn't just 1535 коряво?
+
+TODO what should be internal pass for non-CBOR but just SSH blob?
+and need some another format for uncompressed length prefix
+
+TBD if literal in CBOR, then this means unsupported so switching back to CBOR
+cannot be reliable?
+
+so:
+  FC - copy 2+ bytes literal
+  FD - dispense (decompress) atom
+  FE - escape a single byte
+
+and all 0xFx codes switch off CBOR going to BLOB mode
+
+TBD is VarInt15 enough for atom number and FC length and in byte strings?
+
+need we preserve indefinite-length strings with atoms inside? probably yes,
+ULP may have crypto etc.
+
+TBD may be simply wait for draft-cbor-packed to settle instead of "atom
+surrounded in string"?
+
+ |  Taking into account the encoding of these referring data items, there
+ |  are 16 one-byte references, 48 two-byte references, 512 three-byte
+ |  references, 131072 four-byte references, etc.  As CBOR integers can
+ |  grow to very large (or very negative) values, there is no practical
+ |  limit to how many shared items might be used in a Packed CBOR item.
+
+TBD cbor-packed is less effective in Tag 6, however, what if replace unused codes
+with Tag 6, e.g. 0x5C A0 being equivalent to d6 18 a0 ?
+
+huh, the task of several atoms in a bytestring is almost equivalent to non-CBOR BLOB
+
+possible solution:
+  * for BLOB media type, initialize "remaining_bytes" to entire length, and go
+    to INBLOB state
+  * in CBOR state every opcode is allowed, and special one for strings emits
+    CBOR string prefix, then sets remaining_bytes to string's length
+  * in BLOB state, only FC/FD/FE allowed, any other MUST throw error, and
+    decrement remaining_bytes for every emitted piece
+  * when remaining_bytes becomes zero, go back to CBOR state
+
+so, for strings:
+
+  5C - 2+ byte length (varint) BLOB state inside
+  5D - decompress one atom
+  5E - single byte length BLOB state inside
+
+and same for UTF-8 text strings (7C/7D/7E)
+
+TBD what if use simple(0)..simple(15) for first atoms? so mb change varint to 240
+- that may substitute CBOR fragment as-is, so requires stricter typing in atom
+  setup, that is, InternAtom/GetAtomName/ReleaseAtom
+  - use VarNibbles record format there? differentiate CBAR and CBAP?
 
 
 TODO

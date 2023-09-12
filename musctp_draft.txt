@@ -1855,6 +1855,9 @@ TBD indefinite=concatenated strings in CBAR for Atom compression parts of, e.g. 
 
 TBD lrepeat (reuires 2 args - count and N elements)
 
+TBD if CBAR as Tcl lists, then [cmdname args] may be like CBOR tags to parse,
+e.g. LZF, and "cmdname" may be an atom instead of fixed tag number
+
 TODO
 
 3. Установление соединения (ассоциации).
@@ -3459,6 +3462,20 @@ TBD for sublists with tree of streams, if array[index]=parent then compact?
     of stream in the middle? numbers for others will shift, is it ok?
     TODO study again RFC 4254, SST and HTTP/2 priorities
   - but is it needed? keeping array N*N streams is bad for constrained implementations
+
+TBD make hash keys bytestrings, e.g. instead of
+   ["algorithm", "HMAC", "SipHash", 0, 0] => 2,
+make this indefinite-length array, strip first 0x9f and final 0xff, and make it
+   "\x49algorithm\x44HMAC\x48SipHash\x00\x00" => 2,
+for both string-only hash keys support and memcmp() sort order (of min prefix
+and if equal then shorter length is less)
+- this conflicts with Sep2023 CBAR where atoms inside CBOR swith to BLOB
+  loosing efficiency
+  - do such string convertation only in implementation, not on wire? with
+    #6.40 it's not map anyway so languages with string-only hash keys support
+    not a problem
+
+https://sqlite.org/src4/doc/trunk/www/varint.wiki has memcmp-ordered varints
 
 TODO
 
@@ -7187,6 +7204,7 @@ bytes?
  101aaaaa bbbbbbbb cccccccc                            - 21
  11aaaaaa bbbbbbbb cccccccc dddddddd                   - 30
 
+TBD for byte-granularity memcmp-order is better - e.g. ability to sort keys
 
 =========== Format with Sextets instead of VarNibbles =====
 
