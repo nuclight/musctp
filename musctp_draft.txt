@@ -1858,6 +1858,15 @@ TBD lrepeat (reuires 2 args - count and N elements)
 TBD if CBAR as Tcl lists, then [cmdname args] may be like CBOR tags to parse,
 e.g. LZF, and "cmdname" may be an atom instead of fixed tag number
 
+<<String interning is supported by some modern object-oriented programming languages, including Java, Python, PHP (since 5.4), Lua[4] and .NET languages.[5] Lisp, Scheme, Julia, Ruby and Smalltalk are among the languages with a symbol type that are basically interned strings. The library of the Standard ML of New Jersey contains an atom type that does the same thing. Objective-C's selectors, which are mainly used as method names, are interned strings.
+
+Objects other than strings can be interned. For example, in Java, when primitive values are boxed into a wrapper object, certain values (any boolean, any byte, any char from 0 to 127, and any short or int between −128 and 127) are interned, and any two boxing conversions of one of these values are guaranteed to result in the same object.[6]
+History
+
+Lisp introduced the notion of interned strings for its symbols. Historically, the data structure used as a string intern pool was called an oblist (when it was implemented as a linked list) or an obarray (when it was implemented as an array).
+
+Modern Lisp dialects typically distinguish symbols from strings; interning a given string returns an existing symbol or creates a new one, whose name is that string. Symbols often have additional properties that strings do not (such as storage for associated values, or namespacing): the distinction is also useful to prevent accidentally comparing an interned string with a not-necessarily-interned string, which could lead to intermittent failures depending on usage patterns.>>
+
 TODO
 
 3. Установление соединения (ассоциации).
@@ -7549,6 +7558,8 @@ moreover, if pass length in first frag anyway, then "first" could be one of
 values instead of wasting bit
 - N + N/4 for 2 bits of first and 14 bits of length
 - need frag number in NAK also?
+
+TBD study "Rapid Reset" HTTP/2 attack, invent countermeasures if applicable to us
 
 
 TODO
