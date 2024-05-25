@@ -3351,6 +3351,7 @@ Header VarInt32:
    arbitrarily defined to be 34000 bytes, so maxumum row overhead fits in one
    1280-byte MTU packet.
 TBD zfs_btree 4096-(16+8*129)=3048 -> 1014 + 2 bytes length
+TBD sys/cddl/contrib/opensolaris/uts/common/fs/zfs/range_tree.c
 
   I_HAVE - байтовые строки с именами атомов как фич
 
@@ -3483,8 +3484,14 @@ and if equal then shorter length is less)
   - do such string convertation only in implementation, not on wire? with
     #6.40 it's not map anyway so languages with string-only hash keys support
     not a problem
+  - then string-length bytes also should be replaced in implementation, so
+    that "assoc" sorts after "algorithm" (would be opposite by length), see
+    also https://sqlite.org/src4/doc/trunk/www/key_encoding.wiki
+    - an alternative to simplify memcmp is to have header and body as in
+      SQLite3 record format, where key to compare is at body... again old CBAR?
 
 https://sqlite.org/src4/doc/trunk/www/varint.wiki has memcmp-ordered varints
+see also in Appendix I
 
 TODO
 
@@ -7214,6 +7221,29 @@ bytes?
  11aaaaaa bbbbbbbb cccccccc dddddddd                   - 30
 
 TBD for byte-granularity memcmp-order is better - e.g. ability to sort keys
+int memcmp(const void *s1, const void *s2, size_t n)
+{
+        if (n != 0) {
+                const unsigned char *p1 = s1, *p2 = s2;
+
+                do {
+                        if (*p1++ != *p2++)
+                                return (*--p1 - *--p2);
+                } while (--n != 0);
+        }
+        return (0);
+int key_compare(const void *key1, int len1, const void *key2, int len2){
+  int c = memcmp(key1, key2, len1<len2 ? len1 : len2);
+  if( c==0 ) c = len1 - len2;
+  return c;
+}
+
+
+https://sqlite.org/forum/forumpost/c7f48602d4ce8dcb :
+<<
+- I listened to a talk by Richard Hipp the other day where he said varint was a mistake.
+- Yeah, you did not get what he was saying about varints.  He only said that the SQLite3 implementation of varints was a mistake, because you need to parse the varint before you can compare it.  Just seconds later he proposes a different scheme (used in SQLite4, which experimental and has no release date) where the first byte tells you the length and magnitude of the varint so you can compare them with memcmp() without decoding the whole thing.
+>>
 
 =========== Format with Sextets instead of VarNibbles =====
 
