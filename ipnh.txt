@@ -133,7 +133,7 @@ TBD incorporate Section 1 of https://www.ietf.org/archive/id/draft-omar-ipv10-12
       |   Initial Header   +----------------+
       |                    |  Variable Part |
       +=====================================+
-      | Fragment Descriptor (Balancer Part) |
+      | Fragment Descriptor / Balancer Part |
       +=====================================+
       |                                     |
       |             Options Part            |
@@ -473,11 +473,11 @@ TBD
     It is not yet decided will 5 be for hash 5 or 32-bit ID, and whether 7 be
     for 3 or 4 words.
 
-  Flags:  4 bits
+  Flags:  3 bits
 
     TBD
 
-  Options Length:  4 bits
+  Options Length:  8 bits
 
     Length of options, in 32-bit words. Thus, options may have length from
     0 to 1020 bytes.
@@ -533,8 +533,15 @@ TBD
  110aaaaa bbbbbbbb                                                       - 13
  1110aaaa bbbbbbbb cccccccc                                              - 20
  11110aaa bbbbbbbb cccccccc dddddddd                                     - 27
- 111100aa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 34
- 111101aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 42
+ 111110aa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 34
+ 111111aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 42
+
+ 0..191
+ 110aaaaa bbbbbbbb                                     - 13
+ 11100aaa bbbbbbbb cccccccc                            - 19
+ 11101aaa bbbbbbbb cccccccc dddddddd                   - 27
+ 1111xxxx aaaaaaaa bbbbbbbb cccccccc dddddddd ...      - 32..128 bits
+ 111111yy - specials
 
 TODO must be 0xe0 for same 28 bits as IPv4 Class D Multicast
 
@@ -587,8 +594,15 @@ d9 0104 50 20010db885a3000000008a2e03707334 --> IPv6 address 2001:db8:85a3::8a2e
    |         Identification        |Flags|      Fragment Offset    |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-TBD
+TODO put FrL somewhere in fixed part TBD or maybe MF here and
+     Frg=unfrag/first/nonfirst-1-word/nonfirsr-2-word in fixed part
 
+TBD unit is 4 byte word, so reduce Flags to 2 bit / move to fixed?
+
+TBD move Ident word first and/or combine with Coloring Word so that packet
+    start is simply calculated by adding bits to IHL?
+
+TODO
 
 2.4. CBOR Header: HCver=0xC.
 
