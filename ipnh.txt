@@ -540,11 +540,23 @@ TBD
  110aaaaa bbbbbbbb                                     - 13
  11100aaa bbbbbbbb cccccccc                            - 19
  11101aaa bbbbbbbb cccccccc dddddddd                   - 27
- 1111xxxx aaaaaaaa bbbbbbbb cccccccc dddddddd ...      - 32..128 bits
+ 1111xxxx aaaaaaaa bbbbbbbb cccccccc dddddddd ...      - 32..120 bits
  111111yy - specials
 
 TODO must be 0xe0 for same 28 bits as IPv4 Class D Multicast
+- 27.08.24 as only 23 bits is used in Ethernet, and not all blocks are
+  assigned, this familiarity requirement is no longer of a priority, at least
+  less important than single-byte addresses capacity
 
+TBD what if make lengths external, as in SQLite row header, so SAL/DAL is
+number of nibbles, each descirbing number of bytes?
+- may be useful for constrained (IoT) format (HCver=1), but too complex for
+  performance one, e.g. in common task "reverse source and destination"
+- in fact, the primary representation, at conceptual level, is CBOR, even if
+  particular optimized implementation will never do CBOR - so we don't need
+  arbitrary formats here, like integers up to 128 bits for boths IPv6 and MAC
+  addresses. Let's just do short forms for exact CBOR constructs, like
+  "tagged string with IPv6 address" (and some codes reserved for extension).
 
  F0 - 
  F1 -

@@ -7255,7 +7255,7 @@ https://sqlite.org/forum/forumpost/c7f48602d4ce8dcb :
 - Yeah, you did not get what he was saying about varints.  He only said that the SQLite3 implementation of varints was a mistake, because you need to parse the varint before you can compare it.  Just seconds later he proposes a different scheme (used in SQLite4, which experimental and has no release date) where the first byte tells you the length and magnitude of the varint so you can compare them with memcmp() without decoding the whole thing.
 >>
 
-TBD 24.08.24 what if like SDNV (RFC 6256) for very big lengths, retainin
+TBD 24.08.24 what if like SDNV (RFC 6256) for very big lengths, retaining
 memcmp()-sorting property? start with 0..143 to 60 above, then take CoAP
 option length scheme may be used for low nibble, e.g. 0xF8..0xFC = 8..12 bytes
 follows, 0xf0+13 = 1 byte (to 269) and 0xFE for 2 bytes (0xFF reserved? NaN?
@@ -7276,7 +7276,16 @@ http://web.archive.org/web/20210128145701/http://www.dlugosz.com/ZIP2/VLI.html
  110aaaaa bbbbbbbb                                     - 13
  11100aaa bbbbbbbb cccccccc                            - 19
  11101aaa bbbbbbbb cccccccc dddddddd                   - 27
- 1111xxxx aaaaaaaa bbbbbbbb cccccccc dddddddd ...      - 32..128 bits
+ 1111xxxx aaaaaaaa bbbbbbbb cccccccc dddddddd ...      - 32..120 bits
+ 111111yy xxxxxxxx ...      aaaaaaaa ...               - to 2^32 bytes
+-- in 32 overhead is 1/4, too much
+
+ 0..191
+ 1100aaaa bbbbbbbb                                     - 12
+ 1101aaaa bbbbbbbb cccccccc                            - 20
+ 11100aaa bbbbbbbb cccccccc dddddddd                   - 27
+ 11101aaa bbbbbbbb cccccccc dddddddd eeeeeeee          - 35
+ 1111xxxx aaaaaaaa bbbbbbbb cccccccc dddddddd ...      - 40..128 bits
  111111yy xxxxxxxx ...      aaaaaaaa ...               - to 2^32 bytes
 
 =========== Format with Sextets instead of VarNibbles =====
