@@ -61,9 +61,9 @@ RFC 8546 wire image:
 
 
 for example, QUIC's spin bit (an ugly kludge for measuring RTT
-by on-path observers) is easily replaced by unencrypted packets with
-HEARTBEAT, ECHO. ECNE_CWR and LINK_INFO options, while all other packets could
-remain encrypted
+by on-path observers) is easily replaced by unencrypted (but authenticated)
+packets with HEARTBEAT, ECHO, ECNE_CWR and LINK_INFO options, while all other
+packets could remain encrypted
 
 "Let's simplify user interface features" paradigm is bad and wrong, as seen on example
 of TCP-3 [IEN21] this leads to problems in strategic perspective; [RFC 9170]
@@ -73,7 +73,7 @@ also states about bad assumptions in the protocol design about performance const
 
 due to Unix Time is bad in long scale, Leap Seconds and other problems, this
 protocol version MUST NOT be used in XXII century (recommended method will be
-e.g. Juliand Days or CCSDS DAY SEGMENTED TIME CODE), so, for this version,
+e.g. Julian Days or CCSDS DAY SEGMENTED TIME CODE), so, for this version,
 tv_sec is simply limited to 32 bits (unsigned) and that's it.
 
 
@@ -753,9 +753,16 @@ TBD move tag len to tunnel format so 11 compression rules could be used?
 rule does not need CBAR but can be simple CBOR: uint=copy N bytes from pkt,
 bstr=add literal bytes, negative int for bits?
   TBD full BPF for bit fields? but this is not simple for constrained devices...
+  - [Aug 2024] well, we target entire spectrum sizing from very constrained to
+    very highload, so just offer several options: constrained could use
+    something like GHC/LZF, more capable could accept BPF64 - so this should
+    be one of BPF64 design goals
 
 TBD split Connection Tag to separate Host ID, if IPnh provides us with it
 - and for constrained sizes even Host IDs Sum instead of full pair
+- 17.09.24 also add IPnh tunnel addresses, either in INIT or backends?
+- 18.09.24 see fragmentation issues (for this day), so if ever ConnectionTag
+  considered to be longer than 4 bytes, only alternatives are 8 and 12 bytes
 
   Поле TSN имеет то же значение, что и в SCTP - номер блока данных при передаче
   данных с подтверждением, имеет полный "виртуальный" размер 32 бита, и
@@ -3492,6 +3499,19 @@ and if equal then shorter length is less)
 
 https://sqlite.org/src4/doc/trunk/www/varint.wiki has memcmp-ordered varints
 see also in Appendix I
+
+TBD 28.08.24 as seen in NetBSD, it has different query scheme instead of
+GetNext; also, instead on Get and Set - have one call like sysctl(old, new)?
+but influences notification Value_Changed - make a "subscription" of once
+queried values?
+- subscription needs to refine which portions of tree are shared (must be same
+  on both sides) and which are not
+- NetBSD's CTL_QUERY returns array of just immediate children - may be
+  ineffective (chatty) when want to get many small subtrees
+- yet another possibility: also add sysctlbyname()/sysctlnametomib(), but
+  session-stable `rowid` instead path array
+  - it will be different on each side for most entries, and problematic for
+    implementations to have two trees
 
 TODO
 
@@ -6866,6 +6886,10 @@ IPv4/IPv6 packet.
 
 TODO rewrite prev paragraph for different Tag length and also that port is
 unavoidable in INIT/ACK packets
+- 18.09.24 see fragmentation issues in IPnh.txt for this date, first words
+  must be invariant discriminator of flow for balancers, thus Connection Tag
+  for "normal peaceful Internet" (it still may be compressed in 6LoWPAN where
+  there are no balancers) MUST be in first 4 bytes, changing TSL to Ver/Init
 
 - also see RFC 8900 - e.g. ECMP and load balancers
 

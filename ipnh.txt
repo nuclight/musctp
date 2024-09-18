@@ -453,7 +453,13 @@ TBD
 
     Length of Next Hop field in 32 bit words. May be 0 for absence of Next Hop
     field, the most common expected case, or 1 or 2, for 32-bit of 64-bit
-    Next Hop. Value 3 is currently reserved and MUST NOT be used.
+    Next Hop. Value 3 is currently reserved and MUST NOT be used (it's not
+    decided yet to be 3 words or 2^2 words).
+
+TODO 18.09.24 move this length outside of other lengths: as it is essentially
+like VLAN tag or MPLS label, it will be used by intra-AS routers in links with
+larger MTU when end host may already filled up other available space with
+addresses/options
 
   DIL and SIL: 3 bits each
 
@@ -485,6 +491,8 @@ TBD
   DAL and SAL:  4 bits each
 
     Destination and Source addresses length, in elements.
+
+TBD 18.09.24 may be 1..17 bytes? enough for "tag+IPv6" Aug2024 TBDs in 2.3.1
 
   Total Length:  16 bits
 
@@ -551,21 +559,22 @@ TODO must be 0xe0 for same 28 bits as IPv4 Class D Multicast
 TBD what if make lengths external, as in SQLite row header, so SAL/DAL is
 number of nibbles, each descirbing number of bytes?
 - may be useful for constrained (IoT) format (HCver=1), but too complex for
-  performance one, e.g. in common task "reverse source and destination"
+  performance one, e.g. in common task "reverse source and destination";
+  also constrained may utilize hextet-compressed from early BPF64
 - in fact, the primary representation, at conceptual level, is CBOR, even if
   particular optimized implementation will never do CBOR - so we don't need
   arbitrary formats here, like integers up to 128 bits for boths IPv6 and MAC
   addresses. Let's just do short forms for exact CBOR constructs, like
-  "tagged string with IPv6 address" (and some codes reserved for extension).
+  "tagged string with IPv6 address" (and some codes reserved for extension)
 
- F0 - 
- F1 -
- F2 -
- F3 -
- F4 -
+ 0..191
+ 110aaaaa bbbbbbbb                                     - 13
+ 1110aaaa bbbbbbbb cccccccc                            - 20
+ 111100aa bbbbbbbb cccccccc dddddddd                   - 26
+ F4 - TBD either just 4 bytes or tag of IPv4 ?
  F5 -
- F6 -
- F7 -
+ F6 - TBD here MAC addr or IPv6 tag?
+ F7 - TBD do we need intermediate integer lengths in 40..56 ?
  F8 -
  F9 -
  FA - 4 bytes, CBOR 0x1a
@@ -589,6 +598,15 @@ d9 0104 44 c00a0a01     --> IPv4 address 192.10.10.1
 d9 0104 46 0123456789ab --> MAC address 01:23:45:67:89:ab
 d9 0104 50 20010db885a3000000008a2e03707334 --> IPv6 address 2001:db8:85a3::8a2e:370:7334
 ===
+TBD for F4..FB choice depends on how address space will be designed for
+interoperability with IPv4 and IPv6... from CBOR and compactness PoV, tags
+are better, but for end nodes, it's better to have just one stack
+implementation with connects to addrs like .4.1.2.3.4 for IPv4 1.2.3.4 or to
+.6:2001:db8:85a3:0:0:8a2e:370:7334 for IPv6 (leading dot or colon selects
+decimal or hexadecimal in human representation)
+- they still will have to implement it in DNS (at least A and AAAA), so may be
+  provide tagged versions as "shortcut form" ? with rules like "it must be
+  last element of address"
 
 
 2.3.2. Fragment Descriptor.
@@ -613,6 +631,12 @@ TBD unit is 4 byte word, so reduce Flags to 2 bit / move to fixed?
 
 TBD move Ident word first and/or combine with Coloring Word so that packet
     start is simply calculated by adding bits to IHL?
+
+TBD 18.09.24 using FrL=1 can't be indicator "first fragment, next bytes are
+payload start" because large Options part may also be present; DF must also be
+in main header because it may be unfragmented datagram with no descriptor to
+look for flags - and also there must be preferred copy size (1 or 2 words) if
+fragmentation is allowed (DF=0... so ternary?)
 
 TODO
 
