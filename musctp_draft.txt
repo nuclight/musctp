@@ -7162,6 +7162,8 @@ as ranges in byte?
  1011 10bb cccc dddd eeee ffff gggg       - 22 in 28
  1011 11bb cccc dddd eeee ffff gggg hhhh  - 26 in 32
  11aa bbbb cccc                           - 10
+
+TBD 11xxbbbbcccc - 768 from 10 bits
 ===
 
 bytes?

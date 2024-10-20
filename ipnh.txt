@@ -124,6 +124,20 @@ TBD incorporate Section 1 of https://www.ietf.org/archive/id/draft-omar-ipv10-12
    802.15.4). Thus, IPnh copes with it by having different forms for same
    data.
 
+TBD 20.10.24 Van Jacobson's network channels:
+<<One of the basic ideas behind AF_XDP dates back to Van Jacobson’s talk about network channels. It is about creating a Lock-free channel directly from driver RX-queue into an (AF_XDP) socket.
+[...]
+The transport signature that Van Jacobson talked about, are replaced by the
+XDP/eBPF program choosing which AF_XDP socket to XDP_REDIRECT into.>>
+- This refers http://www.lemis.com/grog/Documentation/vj/lca06vj.pdf slide 26:
+<<socket “registers” transport signature with driver on “accept()”. Gets back a channel.>>
+...so - what if in the future computer will like HPC cluster today? so kernel
+is just a router, and a hierarchical address is for everything, no TCP/UDP
+ports!
+BTW, in muSCTP `ServInstNum` is (independent) idea of something similar to
+those independent sockets in Van Jacobson's talk.
+<<It is, he says, simply the end-to-end principle in action yet again. This principle, which says that all of the intelligence in the network belongs at the ends of the connections, doesn't stop at the kernel. It should continue, pushing as much work as possible out of the core kernel and toward the actual applications.>>
+
 2.1. Overview of packet and main concepts.
 
    IPnh packet has the following general structure:
@@ -217,6 +231,9 @@ a file system metaphor
   /builder02/src/
 
 Host id as st_dev + inode?
+- 20.10.24 or opaque is more simple/secure? and don't require management of IDs
+  - st_dev may be used in routing protocols - where one subscriber "mounted"
+    to multiple providers
 
 with LDAP, there is no more file and directory distinction, also ReiserFS
 
@@ -225,14 +242,33 @@ TBD LDAP has multi-valued RDN, should we generalize it?
 
 . as 0, .. as 1 and ../.. as 2 ?
 **/ for anycast?
+- 20.10.24 or anycast can be "symlink", invisible to sender
+  - however response "here is neares to you" may be more efficient
+    - but may be policy-disabled due to security concerns
 
 it is tempting to mix layers having addresses of sockets, but Lindy Effect
+- but see 20.10.24 of Van Jacobson... at least port compatibility for
+  transition period?
 
-HIP says about mixing two layers, address and identuty, but itself ironically mixes
-identifier with crypto key
+HIP says about mixing two layers, address and identity, but itself ironically mixes identifier with crypto key
 
 Pip:
 ===
+   Thus, the basic form of a Pip address is:
+
+         providerPart,subscriberPart
+
+   where both the providerPart and subscriberPart can have multiple
+   layers of hierarchy internally.
+
+   A subscriber may be attached to multiple providers.  In this case, a
+   host can end up with multiple Pip Addresses by virtue of having
+   multiple providerParts:
+
+         providerPart1,subscriberPart
+         providerPart2,subscriberPart
+         providerPart3,subscriberPart
+...
    For instance, if two neighbor routers have Pip Addresses 1.2.3,4 and
    1.2.8,9.14 respectively, then they share levels 0 and 1, and are
    different at levels below that.  (0 is the highest level, 1 is the
@@ -310,6 +346,8 @@ TBD
     test for presence of Fragment Descriptor by checking field to be non-zero.
     Every Header Compression scheme MAY define different Fragment Descriptor
     formats for these 3 combinations.
+
+TODO 18.09.24 redo for "0 unfragged, other fragged but exact depend on HCver"
 
   ECN:  2 bits
 
@@ -459,7 +497,7 @@ TBD
 TODO 18.09.24 move this length outside of other lengths: as it is essentially
 like VLAN tag or MPLS label, it will be used by intra-AS routers in links with
 larger MTU when end host may already filled up other available space with
-addresses/options
+addresses/options; also CW for coloring word as also addition to length
 
   DIL and SIL: 3 bits each
 
@@ -479,6 +517,8 @@ addresses/options
     It is not yet decided will 5 be for hash 5 or 32-bit ID, and whether 7 be
     for 3 or 4 words.
 
+TBD short option in "every frag options" for overriding hash algo / key / nonce?
+
   Flags:  3 bits
 
     TBD
@@ -493,6 +533,7 @@ addresses/options
     Destination and Source addresses length, in elements.
 
 TBD 18.09.24 may be 1..17 bytes? enough for "tag+IPv6" Aug2024 TBDs in 2.3.1
+- this means minimum address length is 2 bytes
 
   Total Length:  16 bits
 
@@ -500,7 +541,14 @@ TBD 18.09.24 may be 1..17 bytes? enough for "tag+IPv6" Aug2024 TBDs in 2.3.1
 
   Hop Limit (TTL), Protocol, Header Checksum
 
-    See IPv4.
+    See IPv4. Differences are that Checksum does not cover TTL (as in IPv6)
+    and does not cover Options Part with big options - there are special
+    option there, as in DCCP, for their checksum and probably part of payload.
+
+    Header Checksum, however, covers more than IHL words - there are also
+    Coloring Word, Fragment Descriptor and Copy of L4 payload beginning, if
+    fragment. That is, up to 2 + IHL + NHL + CW + (Frg ? 1+FrL : TODO) words
+    (96 bytes max).
 
   Coloring word:  last 32 bits.
 
@@ -637,6 +685,16 @@ payload start" because large Options part may also be present; DF must also be
 in main header because it may be unfragmented datagram with no descriptor to
 look for flags - and also there must be preferred copy size (1 or 2 words) if
 fragmentation is allowed (DF=0... so ternary?)
+- problem: length ternary here, ternary there... may be fix length to 1 word?
+  as L4 ports usually 4 bytes, later variable fields
+  - no, SCTP also have 8 bytes, and muSCTP tunnels probably should be fixed
+    moving ConnectionTag to first 4 bytes changing TSL to Ver/Init
+-> so Frg and FrL:
+   * FrL as "DF or preferred copy length or, if Frg>0, actual copy length"
+   * Frg: unfrag, nonfirst frag, first without copy (payload reachable), and
+     first with copy e.g. too long Options Part which is also fragmented
+   * for first frag, 16 bits of total length after reassembly
+   * for later frags, MF, Resereved bit and Fragment Offset
 
 TODO
 
