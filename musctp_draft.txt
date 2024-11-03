@@ -614,7 +614,7 @@ and UDP port 9426 for tunnel "UDP-Example"
   - how many enough, to 9444?
     - 11264 seems longer available range and 0x2c00 easier for debug
 
-TBD MinimaLT https://cr.yp.to/tcpip/minimalt-20131031.pdf :
+TBD djbernstein's MinimaLT https://cr.yp.to/tcpip/minimalt-20131031.pdf :
 * allows data in first packet given client's ephemeral public key in it and server key in DNS, so may be put a key into CBOR tagged address?
 * add puzzle as option to cookie?
 * MinimaLT rekeying is indistinguishable from new connection
@@ -4797,6 +4797,8 @@ TBD drop codes 8-11 for extension - time/PacketCounter, instead of PkCntWrap?
 - how to encode both values under 30 bits? or extend TIMESTAMP reply with next
   time/PacketCounter pair?
 
+TBD 26.10.24 ~6:00 moving average histogram of packet sizes on receiver - to
+report to sender for MTU change detection/recovery
 
 4.20. FRAGMENT.
 

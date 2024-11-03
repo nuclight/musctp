@@ -249,8 +249,27 @@ TBD LDAP has multi-valued RDN, should we generalize it?
 it is tempting to mix layers having addresses of sockets, but Lindy Effect
 - but see 20.10.24 of Van Jacobson... at least port compatibility for
   transition period?
+  - 22.10.24 what if BGP load balancing of *outgoing* traffic is used by e.g.
+    source ports? then having it at end of address will require non-contiguous
+    masks if existing radix trie algorithms are utilized... so better to view
+    different OSI layers as different dimensions?..
+    - but is such poor traffic engineering method a justify to prohibit?..
+  - 25.10.24 if do, then Host IDs are naturally generalized to Umbrella IDs:
+    host, cluster, department, organization...
+    - however, currently it's impractical as only Host could be mobile
+      (reconnect on different hierarchy subtrees) - but who knows if in the
+      future organizations also can easily get new providers connections
+      "on the fly" ?
 
 HIP says about mixing two layers, address and identity, but itself ironically mixes identifier with crypto key
+
+    ^
+TBD | 25.10.24 ~22:00 a ThSC point in a roaming from Home node is conceptually
+    v   same situation as an IP host moving from 3G to WiFi link without
+        connection interruption so Host IDs are here; however, differences are:
+	1) Host ID ~= SSH key - is for for one online device of several, here,
+	   it's like Anycast for online packets
+	2) for mail/offline data, it's like a Multicast now
 
 Pip:
 ===
@@ -281,8 +300,52 @@ Pip:
    1.2.4..., 1.2.5..., or 1.3..., 1.4..., and so on).  Thus, 1.2.8,9.14
    should be configured to inform 1.2.3,4 that it does not need level 1
    or 2 information.
+===
+TBD 21.10.24 do we need "," in *packet* address encoding at all? filesystem
+metaphor allows for host to send to "../../dest/server", making it natural for
+IoT-constrained networks having short addresses, and let's routers to deal
+with who is mounted to who at absolute addresses, not complicating address
+encoding with CBOR tags. So there will be just a few special numbers for ".."
+and "*" and may be "+" or "#" from MQTT, need more thinking here - but no more
+wasting a bit or entire byte just for "," tag.
+- "../style" is good for IoT, but it is essentially one-hop: router later in
+  chain will probably have another prefix so ".." will become invalid if
+  packet is not rewritten. May be better to have 3'rd element as common prefix
+  for address compression? Or series of routing instructions with DNS-like
+  label compression? However, such source-routing instructions also require
+  a pointer "where we currently are at", which again is not very performant.
+  Still, in a snail-mail/courier metaphor it is possible to not include
+  country and town if delivery is in the same town - so inside one corporation
+  or IoT PAN-network should be possible also, modulo fact subscriberPart may
+  be connected via several global prefixes, like "in same mounted filesystem".
+  Need to look closer to Pip and RFC1475 in more detail...
+- 22.10.24 metaphor: address is like street, ID is like First Name Last Name
+  on envelope - could be registered in this house, could be not; having
+  memcmp()-comparable addresses - utilize existing radix tries just rounded
+  to 8 bits instead of as in CIDR
+
+TBD 25.10.24 05:09 it should be done the way when it simply is not possible to
+spoof source IP address, thus flooding DDoS-attacks will die in the past
+- 29.10 if this is path in tree (addrs combined), then how to force router to
+  check incoming packet is not of spoofed path segment? In current Internet,
+  reverse lookup is not done for performance reasons but this also allows
+  mobile hosts (triangle); here, we can have Host IDs for mobile, but how to
+  force, still? OK, it can't be full path that verified (e.g. rogue routers),
+  but at least at first lawful router (so traceable entry point of spoofed
+  flood) - how to make it that without path element validity check the whole
+  system will simply not work?..
+
+TBD renumbering problem: if one company has 10,12.3.4 and other has 10,12.4.1
+then on merge acquisition they'll have overlapping addresses (problem in
+current IPv4/IPv6 with even possible need for internal NAT); in Pip this is
+not problem while hosts talk inside their own net with relative addresses, but
+when to other? So need mechanism for all hosts to seamlessly be configured
+like "change our prefix from 10,12.3 to 10.192.12.3" - as it is similar in
+spirit mobile hosts, should be doable, but need to think details (and this is
+thus a MUST to have relative addressing as in above paragraphs)
 
 
+===
 RFC 3649:
    In order for best-effort flows to safely start-up faster than slow-
    start, e.g., in future high-bandwidth networks, we believe that it
@@ -354,6 +417,57 @@ TODO 18.09.24 redo for "0 unfragged, other fragged but exact depend on HCver"
     Explicit Congestion Notification bits, placed at the same place and having
     the same meaning as in IPv4 header.
 
+TBD RFC 4782 "Quick-Start for TCP and IP" - what if integrate this in every
+packet into unchecksummed "On-Path modify" word instead of ECN? together with
+MTU; however, long nonces and other abuse/lying preventing measures are
+required...
+   The Performance Transparency Protocol (PTP) includes a proposal for a
+   single PTP packet that would collect information from routers along
+   the path from the sender to the receiver [W00].
+   ETEN:
+   Additional proposals for end nodes to collect explicit information
+   from routers include one variant of Explicit Transport Error
+   Notification (ETEN), which includes a cumulative mechanism to notify
+   endpoints of aggregate congestion statistics along the path [KAPS02].
+   (A second variant in [KSEPA04] does not depend on cumulative
+   congestion statistics from the network.)
+-- and other listed in Appendix A there are interesting
+- 22.10 also checksum for very short:
+===
+Cohen & Postel                                                  [page 1]
+                                                              2 May 1979
+Multiplexing Protocol                                             IEN-90
+Introduction
+
+The  demultiplexing   routine  should  be  able  to  handle  recursively
+multiplexed  messages.   This is  to  allow  higher  level  protocol  to
+demultiplex  their own messages  if they can be combined.   Since such a
+multiplexed  message  may be  multiplexed  again  by  the  IN  level,  a
+multi-level multiplexing results.
+
+This protocol  assumes  that  the  Internet  Protocol  is  used  as  the
+underlying protocol.
+
+Format
+------
+
+                  0      7 8     15 16            31  
+                 +--------+--------+----------------+ 
+                 |        |        |                | 
+                 |   CS   |Protocol|      Length    | 
+                 |        |        |                | 
+                 +--------+--------+----------------+ 
+
+                       Multiplexing Header Format
+Fields
+------
+
+CS is a checksum  covering  only this 32 bit multiplexing header.  Until
+further notice, it is the exclusive OR of the other three octets in this
+header.
+===
+
+
 TBD
 
 2.2.1. Coloring word.
@@ -381,6 +495,9 @@ TBD
     load balancing also, e.g. it may be expanded to full 12 bits instead of
     just 6 bits of current DSCP.
 
+TBD 22.10.24 given RFC 1621 Section 7, put Ver here, and for zero ver ECN with
+DSCP/Label as for compatibility with current IPv4/IPv6 ?
+
   R:  1 bit
 
     Reserved for future use, MUST be 0 on send and ignored on receipt.
@@ -391,7 +508,7 @@ TBD
     conflicting legal and moral requirements. While Internet always was been
     for global connectivity and against censorship, and that was supported by
     using cryptographic means to prevent e.g. tampering of the packet, there are
-    still valid cases when middleboxes could something to packets instead of
+    still valid cases when middleboxes could do something to packets instead of
     dropping (philosophically like ECN field added instead of dropping) to let
     end-system (or near-end system) to decide. Most notable example of this is
     "adult content" where for many people it is normal but parents may want to
@@ -400,7 +517,7 @@ TBD
     cryptography and other hiding tools usually leaves the only choice for
     censors to block traffic completely, an "all-or-nothing", because e.g.
     HTTPS do not allow them to add "COURT DECIDED THIS IS FAKE NEWS SITE"
-    Big Banner or something like that. We believe that adding such
+    Big Banner or something like that to web page. We believe that adding such
     outside-of-content markers could reduce level of censorship blocks in the
     world.
 
@@ -430,23 +547,17 @@ TBD
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |Version|  IHL  | HCver |Frg|ECN|Flags|Reserved |NHL| DIL | SIL |
+   |Version|  NHL  | HCver |Frg|FrL|          Total Length         |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |Options Length |  DAL  |  SAL  |          Total Length         |
+   |IHL (L4 Offs)|   L4 Protocol   |Flags|E2E Opts Len | DIL | SIL |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |Hop Limit (TTL)|    Protocol   |         Header Checksum       |
+   |     DAL     |     SAL     |CWL|         Header Checksum       |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Reserved, ECN or in transit-changed data/Ptrs| Hop Limit (TTL) |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                                                               |
    .   Next Hop / Forward Route Identifier - optional, NHL words   .
    |                                                               |
-   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   \                                                               \
-   /     Destination address (variable length, DAL elements)       / 
-   \                                                               \
-   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   \                                                               \
-   /        Source address (variable length, DAL elements)         / 
-   \                                                               \
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                                                               |
    .           Destination Host ID - optional, DIL words           .
@@ -457,7 +568,15 @@ TBD
    |                                                               |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    \                                                               \
-   /                Every fragment routing options                 /
+   /       Destination address (variable length, DAL bytes)        /
+   \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   \                                                               \
+   /          Source address (variable length, DAL bytes)          /
+   \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   \                                                               \
+   /              Every fragment (Hop by Hop) options              /
    \                                                               \
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                         Coloring word                         |
@@ -485,6 +604,8 @@ TBD
         By comparison, the number of TCAM entries needed to parse a set
         of N arbitrarily ordered TLVS is approximately e*N!.
 ===
+TBD "Options Present" bitmap is also in PIP - combine somehow
+
     TBD
 
   NHL:  2 bits
@@ -498,6 +619,11 @@ TODO 18.09.24 move this length outside of other lengths: as it is essentially
 like VLAN tag or MPLS label, it will be used by intra-AS routers in links with
 larger MTU when end host may already filled up other available space with
 addresses/options; also CW for coloring word as also addition to length
+- TBD 23.10.24 https://www.ietf.org/archive/id/draft-bryant-arch-fwd-layer-ps-05.html
+  says that many length are not enough (esp. MPLS), so let's increase it!
+  - TBD 03.11.24 or put into IHL real offset to some part e.g. end of
+    identifiers? better for entire header to have 1-byte-described length,
+    even better to fit into one mbuf
 
   DIL and SIL: 3 bits each
 
@@ -518,6 +644,13 @@ addresses/options; also CW for coloring word as also addition to length
     for 3 or 4 words.
 
 TBD short option in "every frag options" for overriding hash algo / key / nonce?
+
+TBD 03.11.24 put MTU into On-Path field when gets fragmented by router
+
+  CWL:  2 bits
+
+    Length of balancer/L4 helper part which is not related to fragmentation.
+    Currently only 0 and 1 defined, with 1 meaning - Coloring Word present.
 
   Flags:  3 bits
 
@@ -709,14 +842,14 @@ TODO
    described in [NDN-FRAG], it also has drawbacks. Thus, an attempt was made
    to put a little more non-CBOR fields - that is, use Next Hop from
    traditional format to make it possible for reasembly/refragmening on just
-   some (presimable border) routers, not all of them. This also means presence
+   some (presumable border) routers, not all of them. This also means presence
    of Traffic Class / Flow Label for them, where, again, Flow Label is a part
    of fragment identifier.
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |Version|  IHL  | HCver |Frg|ECN| Initial/Frag Header Checksum  |
+   |Version|  IHL  | HCver |Frg|CWL| Initial/Frag Header Checksum  |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |Reserved | NHL |                  Total Length                 |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -768,9 +901,9 @@ TBD
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |                           Identification                      |
+   |                        Identification                         |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |                  Fragment Offset or Total Length              |
+   |                Fragment Offset or Total Length                |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 TBD
