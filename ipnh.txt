@@ -109,7 +109,7 @@ TBD incorporate Section 1 of https://www.ietf.org/archive/id/draft-omar-ipv10-12
    chains and even special servers for formatting Pip headers (violating
    end-to-end Internet principle, is now considered bad). However, it has
    many actual things, most notable mobility ID and same subscriber's part
-   under different porviders in hierarchy.
+   under different providers in hierarchy.
 
 2. Concepts and header.
 
@@ -143,22 +143,23 @@ those independent sockets in Van Jacobson's talk.
    IPnh packet has the following general structure:
 
       +=====================================+
-      |                    |  Fixed Part    |
-      |   Initial Header   +----------------+
-      |                    |  Variable Part |
+      |                    |  Fixed Part    | \
+      |   Initial Header   +----------------+  |
+      |                    |  Variable Part |  copied in
+      +=====================================+  every fragment
+      |       Fragment Descriptor and       |  |
+      | Balancer ("L3.5" - L4 helping) Part | /
       +=====================================+
-      | Fragment Descriptor / Balancer Part |
-      +=====================================+
-      |                                     |
-      |             Options Part            |
-      |                                     |
-      +=====================================+
-      |                                     |
-      |                                     |
-      |               Payload               |
-      |                                     |
-      |                                     |
-      +=====================================+
+      |                                     | \
+      |       End to End Options Part       |  |
+      |                                     |  |
+      +=====================================+  |
+      |                                     |  every fragment has
+      |                                     |  different part of it
+      |               Payload               |  |
+      |                                     |  |
+      |                                     |  |
+      +=====================================+ /
 
    As fragmentation is an important part of IPnh, there is special part in
    packet if it is fragmented. To solve most of fragmentation problems
@@ -334,6 +335,60 @@ spoof source IP address, thus flooding DDoS-attacks will die in the past
   but at least at first lawful router (so traceable entry point of spoofed
   flood) - how to make it that without path element validity check the whole
   system will simply not work?..
+  - 09.11.24 yes, relative addresses and current pointer for receiving router
+    "you are at this position": e.g. D.E.F -> K.L.M.N and if there are
+    addresses X.2.2.2.2...2 and Y.2.2.2.2...2 it will be impossible for
+    receiving router to distinguish relative prefix without pointer; even if
+    E router has direct link to L router, it just advances pointer by 3
+    instead of 1; so now spoofed addresses can be only A.B.C under D.E.F if
+    all routers are lawful and spoof is from distinct branch. Rogue router can
+    inject D.E.F->K.L.M.N directly to L router, or it can be L's client, but
+    now it needs to be near destination. This does not prevent spoofing
+    completely, but greatly reduces sets of addresses available to attacker,
+    in contrast to current Internet "any spoofed src IP from anywhere", while
+    being not much harder for usual routers' operations than decrementing TTL,
+    but allowing all the Pip relative intra-organization addressing (helping
+    to e.g. renumbering problems) with it's bonuses. Now, need a way to find
+    "entry points" of spoofed addresses into network - on which lawful router
+    via which link that happened, possibly by signaling within a routing
+    protocol - and DOTS [RFC 9132] protocol signaling seems far from this...
+    - 13.11 link from E to L may be via router from completely different branch,
+      e.g. our example was for absolute addresses T.T.F.E.D to T.T.K.L.M.N and
+      T.T.F.E has route to T.T.K.L via T.S.P.Q
+    - 14.11 also, hierarchy assumes that there is spanning tree for entire network
+      graph with always a link to parent, but this link can go down - so there
+      is a need for a packet from T.T.F.E.D be routed to T.T.F.H when F<->E
+      link is down and relative addresses where E.D -> H (for example, again
+      via T.S.P.Q)... Moreover, what happens if the only route left available
+      is not via T.S.P.Q but even via descendant of T.T.F.E, i.e. packet must
+      for some time travel lower in the hierarchy?..
+      - metaphor for in-capital mail tunneled via suburb when bridge burned
+    - 15.11 if tunneling, then it is VPN-like or MPLS-like using of Next Hop
+      and relative adresses become irrelevant for intermediate routers, now
+      they are used only by end routers and clients
+      - 16.11.24 need a way for simplified routing without MPLS-like Next Hop,
+	e.g. for (compatibility with) constrained hosts (different HCver), so
+	current pointer again? Need to re-consider spoof in this case
+    - but what prevents malicious client from giving absolute dst address so
+      lazy router does lookup only on destination?
+      - make address always relative, so client router will have to compare
+	it's own interface address' tail with source address, and end client
+	host thus must specify real interface address prefix for router's
+	comparison to succeed - so antispoof anti-DDoS goal is achieved
+
+  Absolute level 0 (@root)    T
+                             / \
+                            T   S
+                           / \   \
+  Relative Level 0        F - K   P
+                         /     \   \
+  Relative Level 1      E ----- L - Q
+                       / `.      \.-'
+                      /    \    /'\
+  Relative Level 2   D      `--'   M
+                                    \
+  Relative Level 3                   N
+
 
 TBD renumbering problem: if one company has 10,12.3.4 and other has 10,12.4.1
 then on merge acquisition they'll have overlapping addresses (problem in
@@ -343,7 +398,25 @@ when to other? So need mechanism for all hosts to seamlessly be configured
 like "change our prefix from 10,12.3 to 10.192.12.3" - as it is similar in
 spirit mobile hosts, should be doable, but need to think details (and this is
 thus a MUST to have relative addressing as in above paragraphs)
+- e.g. https://t.me/freebsd_ru/584396 (свиноферма / CARP)
+  - 15.11.24 multiple networks on same physical L2 interface are allowed under
+    restriction that no address is prefix of another address, so that CARP
+    scenario with L2 bridged triangle should be doable with proper addresses
+    selection
 
+TBD 04.11.24 uni-flow TCP3-like, CCCP and RFC 3124 (Congestion Manager):
+<< sender and receiver.  For the Internet to remain stable, each of
+   these streams must incorporate control protocols that safely probe
+   for spare bandwidth and react to congestion.  Unfortunately, these
+   concurrent streams typically compete with each other for network
+   resources, rather than share them effectively.  Furthermore, they do
+   not learn from each other about the state of the network.  Even if
+   they each independently implement congestion control (e.g., a group
+   of TCP connections each implementing the algorithms in [Jacobson88,
+   Allman99]), the ensemble of streams tends to be more aggressive in
+   the face of congestion than a single TCP connection implementing
+   standard TCP congestion control and avoidance [Balakrishnan98].
+>>
 
 ===
 RFC 3649:
@@ -379,11 +452,13 @@ TBD
   Version:  4 bits
 
     The Version field indicates the format of the internet header.
-    For this draft, let the version be 8 (may be changed by IANA later).
+    For this draft, the version later assigned by IANA will be either 8, as
+    the successor of the Pip and letter "h", or 3, with network as "tree"
+    and continuing some things from TCP/IP version 3.
 
   IHL:  4 bits
 
-    Initial Header Length, in units depending on HCver.
+    Initial Header Length, or some part of it, in units depending on HCver.
 
   HCver:  4 bits
 
@@ -394,7 +469,7 @@ TBD
     between "big" Internet and constrained segment can statelessly transform
     packet from one header format from another.
 
-    This drafts currently defines HCver 0 and 1.
+    This drafts currently defines HCver 0, 1 and "maximal CBOR".
 
   Frg:  2 bits
 
@@ -433,7 +508,7 @@ required...
    congestion statistics from the network.)
 -- and other listed in Appendix A there are interesting
 - 22.10 also checksum for very short:
-===
+===<<
 Cohen & Postel                                                  [page 1]
                                                               2 May 1979
 Multiplexing Protocol                                             IEN-90
@@ -467,6 +542,10 @@ further notice, it is the exclusive OR of the other three octets in this
 header.
 ===
 
+   The ECN field expected to be here in constrained profiles, "big" versions
+   expected to use this bits for something else, while spending more than
+   2 bits for congestion info from newer research, being not limited to
+   IPv4/IPv6 ToS/DSCP byte legacy.
 
 TBD
 
@@ -497,6 +576,14 @@ TBD
 
 TBD 22.10.24 given RFC 1621 Section 7, put Ver here, and for zero ver ECN with
 DSCP/Label as for compatibility with current IPv4/IPv6 ?
+- 15.11.24 not quite, if this just 1 word, it will be in "legacy format" as in
+  IPv6 first word, with ECN here, and GovMark in place of IP version;
+  otherwise need some format indicator and may be even options inside - for
+  recording On-Path info from routers, more info on congestion from routers
+  than just CE, more coloring than in DSCP, etc.
+  ...should we allow all IPnh implementations MUST support ECN, so that absence
+  of L3.5 part, meaning all fields equal to default zero, may be "fixed" by
+  transit router by inserting this word with CE value?
 
   R:  1 bit
 
@@ -536,6 +623,8 @@ DSCP/Label as for compatibility with current IPv4/IPv6 ?
 
     Same as in IPv6.
 
+TODO
+
 2.3. Optimized for performance header: HCver=0.
 
    This is variant of header intended to be most common, in "normal"
@@ -549,45 +638,59 @@ DSCP/Label as for compatibility with current IPv4/IPv6 ?
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |Version|  NHL  | HCver |Frg|FrL|          Total Length         |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |IHL (L4 Offs)|   L4 Protocol   |Flags|E2E Opts Len | DIL | SIL |
+   |IHL=L3.5 Offs|   L4 Protocol   |Flags|E2E Opts Len | SIL | DIL |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |     DAL     |     SAL     |CWL|         Header Checksum       |
-   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |Reserved, ECN or in transit-changed data/Ptrs| Hop Limit (TTL) |
+   |Hop Limit (TTL)|SimplRoutContxt|    SAL    |    DAL    |L3.5Len|
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                                                               |
-   .   Next Hop / Forward Route Identifier - optional, NHL words   .
+   . Next Hop / Forward Route Instructions - to NHL words boundary .
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ <-- NHL
+   |                                                               |
+   .             Source Host ID - optional, SIL words              .
    |                                                               |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                                                               |
    .           Destination Host ID - optional, DIL words           .
    |                                                               |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |                                                               |
-   .             Source Host ID - optional, SIL words              . 
-   |                                                               |
+   \                                                               \
+   /          Source address (variable length, SAL bytes)          /
+   \                                                               \
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    \                                                               \
    /       Destination address (variable length, DAL bytes)        /
    \                                                               \
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    \                                                               \
-   /          Source address (variable length, DAL bytes)          /
-   \                                                               \
-   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   \                                                               \
    /              Every fragment (Hop by Hop) options              /
    \                                                               \
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ <-- IHL
+   |                                                               |
+   .       Layer 3.5 (Layer 4 helping) part (Coloring words)       .
+   .              optional, L3.5Len-(Frg?1+FrL) words              .
+   |                                                               |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |                         Coloring word                         |
-   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   .       Fragment Descriptor, if fragmented - FrL+1 words        .
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ IHL+L3.5Len
 
 
-  IHL:  4 bits
+  IHL:  7 bits
 
-    Initial Header Length is in 32-bit words, like IPv4, but to obtain actual
-    length, 2 is added. That is, maximum length of header is 68 bytes, and IHL
-    value MUST NOT be zero or one - these reserved for future use.
+    Initial Header Length is in 32-bit words, like IPv4, but six bits.
+    That is, maximum length of initial header is 508 bytes, and IHL
+    value MUST NOT be less than 4.
+
+    As L3.5Len is distinct from IHL, the minimum MTU REQUIRED to be 576 bytes
+    to be also possible to include maximal-sized Layer 3.5 part and some
+    fragment bytes. Rationale to excluding L3.5Len from IHL is to allow 264
+    bytes of options on maximal sizes og NHL, SIL, DIL, SAL and DAL
+    (60+28+28+64+64=244), of which single long options block header will leave
+    256 guaranteed bytes for option values.
+
+TBD IHL+L3.5Len is for BPF_LDX|BPF_MSH|BPF_IND: X <- X+4*(P[X+k:1]&0xf) from BPF64
 
   Flags and Reserved:  8 bits
 ===
@@ -627,30 +730,20 @@ addresses/options; also CW for coloring word as also addition to length
 
   DIL and SIL: 3 bits each
 
-    Destination Host ID length and Source Host ID length, in words. Actually,
-    not all values are for length - some say that there is no corresponding ID
-    in packet, and this is number of hash algo to calculate it:
-
-    0 - no ID in packet, hash algorithm 0
-    1 - no ID in packet, hash algorithm 1
-    2 - no ID in packet, hash algorithm 2
-    3 - no ID in packet, hash algorithm 3
-    4 - no ID in packet, hash algorithm 4
-    5 - Reserved
-    6 - Host ID present, 2 words (64 bits)
-    7 - Reserved
-
-    It is not yet decided will 5 be for hash 5 or 32-bit ID, and whether 7 be
-    for 3 or 4 words.
-
-TBD short option in "every frag options" for overriding hash algo / key / nonce?
+    Destination Host ID length and Source Host ID length, in words. If length
+    is 0, then ID is absent from packet and is instead calculated from full
+    host address. Hash algorithm (and possibly key/nonce) may be overriden by
+    short option in "Every fragment options", but by default is SipHash-2-4-128
+    with a key being "IPnh\0\0..." (four characters "IPnh "padded by number of
+    zeroes required by algorithm).
 
 TBD 03.11.24 put MTU into On-Path field when gets fragmented by router
 
-  CWL:  2 bits
+  L3.5Len:  4 bits
 
-    Length of balancer/L4 helper part which is not related to fragmentation.
-    Currently only 0 and 1 defined, with 1 meaning - Coloring Word present.
+    Length of balancer/L4 helper part together with fragment descriptor, if
+    present. If, after subtracting fragment descriptor, length is 1 word, then
+    it is Coloring Word in legacy compatible format.
 
   Flags:  3 bits
 
@@ -667,6 +760,18 @@ TBD 03.11.24 put MTU into On-Path field when gets fragmented by router
 
 TBD 18.09.24 may be 1..17 bytes? enough for "tag+IPv6" Aug2024 TBDs in 2.3.1
 - this means minimum address length is 2 bytes
+- 16.11.24 make it 6 bits, in bytes+1 (1..64) and contents being
+  variable-length integers, encoded as UTF-8 in it's original RFC (not current),
+  that is, allowing to 2^31 on every level. This is fat (3 bytes for 16 bits)
+  but needed for error-checking, HCver for constrained nodes will have
+  different encoding
+  - or still limit and give some values for escape?..
+
+    Note that addresses in packet are always relative to their common prefix
+    from root of the tree, even if that prefix is of null length (in this
+    particular case adresses are absolute), so first router accepting packet
+    from end host compares tail of it's own network with source address. See
+    corresponding section on renumbering, intra-organization and anti-DDoS.
 
   Total Length:  16 bits
 
@@ -683,11 +788,15 @@ TBD 18.09.24 may be 1..17 bytes? enough for "tag+IPv6" Aug2024 TBDs in 2.3.1
     fragment. That is, up to 2 + IHL + NHL + CW + (Frg ? 1+FrL : TODO) words
     (96 bytes max).
 
+TBD 03.11.24 what if just one XOR byte instead of usual Internet checksum?
+it's faster to incrementally update (e.g. TTL) even than RFC 1141 procedure
+and has the same "is zero" property on check if correct
+
   Coloring word:  last 32 bits.
 
     For Traffic Class and Flow Label, optional, see section on coloring word.
 
-  Next Hop / Forward Route Identifier:  absent, 4 or 8 bytes
+  Next Hop / Forward Route Instructions:  absent or words up to 48 bytes
 
     This optional field, if present, contains information to be interpreted by
     next router *instead* of Destination Address, and possibly other
@@ -698,12 +807,24 @@ TBD 18.09.24 may be 1..17 bytes? enough for "tag+IPv6" Aug2024 TBDs in 2.3.1
 
     This specification does not constrain how this field to be implemented,
     but possible suggestions could include even offset of routing entry in FIB
-    memory region, along with some error checking bits.
+    memory region, the only requirement here is to include some error checking
+    or authentication bits, so that:
+    1) errors detected while routing protocol converges
+    2) unauthorized end-user host (non-router) could not guess this field
 
     Note that, despite of name, this value is not restricted to be hop-by-hop
     or changed at every hop, so chain of routers in area from entry to exit
     could all use single value in this field, making variable-length
     addressing not slower, but even faster than traditional CIDR.
+
+  SimplRoutContxt:  8 bits.
+
+    Used for simplified routing schemes inside a controlled administrtive area
+    where full routing protocol is not running and thus Next Hop words are
+    absent. This field is expected to include some packet level or distance
+    and thus changed at every hop, so it is placed near TTL.
+
+TBD
 
 2.3.1. Addresses.
 
@@ -798,20 +919,15 @@ decimal or hexadecimal in human representation)
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   \                                                               \
-   /   Copy of first fragment payload's first 0, 1, or 2 words     /
-   \                                                               \
+   |         Identification        |       Fragment Offset     |R|M|
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |         Identification        |Flags|      Fragment Offset    |
+   |                                                               |
+   .  Copy of first fragment payload's first 0, 1, 2 or 3 words    .
+   |                                                               |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 TODO put FrL somewhere in fixed part TBD or maybe MF here and
      Frg=unfrag/first/nonfirst-1-word/nonfirsr-2-word in fixed part
-
-TBD unit is 4 byte word, so reduce Flags to 2 bit / move to fixed?
-
-TBD move Ident word first and/or combine with Coloring Word so that packet
-    start is simply calculated by adding bits to IHL?
 
 TBD 18.09.24 using FrL=1 can't be indicator "first fragment, next bytes are
 payload start" because large Options part may also be present; DF must also be
@@ -828,6 +944,181 @@ fragmentation is allowed (DF=0... so ternary?)
      first with copy e.g. too long Options Part which is also fragmented
    * for first frag, 16 bits of total length after reassembly
    * for later frags, MF, Resereved bit and Fragment Offset
+
+TODO
+
+2.3.3. Options.
+
+   Options in IPnh HCver=0 have two formats: short options and long option
+   blocks. In short options, a single byte describes both option kind and
+   option length, and all short options MUST be supported by every IPnh
+   implementation.
+
+       0   1   2   3   4   5   6   7
+     +---------------+---------------+
+     |               |               |
+     |  Option Kind  | Option Length |   1 byte
+     |               |               |
+     +---------------+---------------+
+     \                               \
+     /                               /
+     \                               \
+     /         Option Value          /   0 to 13 bytes
+     \                               \
+     /                               /
+     \                               \
+     +-------------------------------+
+
+   Short options are distinguished by having their kind (most significant
+   nibble) value less than 14 (0xE), so long options are started by
+   high-bits-set pattern.
+
+   Note that short options and long option numbers share the same number
+   space (short options implicitly have class with all 0 bits), so that, for
+   example, NOP padding option may appear in long options, too.
+
+   Long options MUST be aligned to word boundary and are describing several
+   options at once. The rationale behind this is the same as returning from
+   IPv6's multiple headers to "header lengths + options" scheme: it's more
+   performant for parser to have all needed information at once in single
+   cache line of expensive wire-speed cache, to lookup only interesting
+   option, than to load several cache lines iterating all options only to find
+   that most of them will be skipped.
+
+   Long options are consisting from header, in integral number of double
+   words, and then all concatenated corresponfing option values and padding
+   bytes after values, if any. Each double word (64 bits) in header starts
+   from 3 bits set to 1, then single bit flag - set if this double word in
+   this long option block is last, and then three 20-bit option headers:
+
+    0         1         2         3         4         5         6  6
+    0 2 4 6 8 0 2 4 6 8 0 2 4 6 8 0 2 4 6 8 0 2 4 6 8 0 2 4 6 8 0  3
+   +----------------------------------------------------------------+
+   |111L|  Option header 1  |  Option header 2  |  Option header 3  |
+   +----------------------------------------------------------------+
+   |1110|  Option header 2  |  Option header 3  |  Option header 4  |
+   +----------------------------------------------------------------+
+   .                                                                .
+   +----------------------------------------------------------------+
+   |1111| Option header N-2 | Option header N-1 |  Option header N  |
+   +----------------------------------------------------------------+
+   \                                                                \
+   /                   Option values and paddings                   /
+   \                                                                \
+   +----------------------------------------------------------------+
+
+   Note that this is possible (e.g. after filling 64-byte cache line with
+   headers for 24 options) for a packet to have more than one long option
+   block. Then, after end of current block, determined by sum of all it's
+   lengths and paddings, it is possible to have again some short options or
+   new long option block.
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Mnd|C|Option number| Option length |Pad|
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+     Mnd - whether it's mandatory to support or skip and/or report
+TBD define like in SCTP or CoAP or IPv6 [RFC 8200] rethink 10 & 11 about multicast
+
+     C - whether this option's value may change in transit (for
+     Authentication, like in IPv6 [RFC 8200])
+
+     Option length - value length in bytes
+
+     Pad - pad after option value, in bytes
+
+   Unused space is simply set to all zeroes - effectively being zero-padding
+   options. If some option requires more than word alignment, so that Pad must
+   be more than 3 bytes - again, option 0 with proper length may be used.
+
+2.3.3.1. No-op (padding) option - number 0.
+
+   MAY have zero length. Contents is not processed, effectively used as padding.
+   Note that there is no "End of Option List" in IPnh HCver=0 - as padding
+   option can have non-zero length, it is used in such case, padding till end
+   of option area.
+
+2.3.3.2. Attribution option - number 1.
+
+   Used for options which are inserted by transit routers, in contrast to
+   originating node - to distinguish which options belong to whom. Contents is
+   absolute IPnh address of inserting node, in usual HCver=0 encoding. This
+   option MUST have non-zero length and MUST have syntactically valid address
+   as value. There MAY be more than one option of this kind in each option
+   area of packet.
+
+   The operation is as follows: from the beginning of processed option area
+   (Hop by Hop or End to End), options are from node which created original
+   packet. After each Attribution option, options following it were inserted
+   in transit by system with specified address.
+
+TODO 16.11.24 by https://www.ietf.org/archive/id/draft-herbert-6man-eh-attrib-03.txt
+
+2.3.3.3. Checksum option - number 2.
+
+   Contains checksum, CRC32 or other checking value (may be even cryptographic
+   hash), together with coverage and other information needed for calculation.
+   This option's value MUST be aligned to word boundary. Bytes included to
+   calculation are words before, bytes with information and then bytes after
+   checksum value, subject to lengths. That is, bytes where checksum value
+   will be placed are not participating, instead of pretending being zero.
+TBD or zeroing value will be faster to calc?
+
+   If checksum option is present in packet, then it MUST be verified by
+   receiver and packet silently discarded if corruption was found.
+
+   Version with 2-byte checksum:
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |E|Algo |CsCovBefore|CsCovAfter |       Checksum, 2 bytes       |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   Version with 4-byte CRC32c:
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |E|Algo |CsCovBefore|CsCovAfter |     Unused, MUST be zero      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                        CRC32c Checksum                        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   E - extended information (more than 2 bytes), reserved for future use
+
+   Algo - checksum's algorithm
+   0 - traditional Internet Checksum
+   1 - CRC32c as in iSCSI and SCTP
+   2 - SipHash-2-4-64 TBD
+TODO
+
+   CsCovBefore - coverage, in words, of bytes before this option. Have no
+   special values, that is, zero means zero words.
+
+   CsCovAfter - coverage, in words, of bytes after this option's value. Zero
+   value is special (like '*' wildcard), meaning "everything up to and
+   including upper boundary"
+TBD what is for E2E and payload?
+
+   Handling differs for Hop by Hop and End to End option parts. For End to End
+   options, there is logically nothing before start of this area, as packet
+   may have been fragmented and different fragments may have gor something
+   different in their initial headers in transit. So CsCovBefore MUST NOT be
+   going before start of End to End options area. Also, it is possible by this
+   option to have some bytes of payload to be covered by checksum. The
+   opposite holds for Hop by Hop options - here, CsCovAfter MUST NOT cover
+   anything after end of Fragment descriptor, as if nothing exists there.
+TBD may be relax this for early fragment detection/retransmit?
+
+   Note that this is possible to have multiple instances of checksum option
+   per option area, in which case they SHOULD NOT overlap - for possibility
+   for (inserting) transit system to not recalculate regions they don't need
+   to (or even nothing at all).
+
+TODO
 
 TODO
 

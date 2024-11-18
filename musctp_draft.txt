@@ -1609,6 +1609,9 @@ long options (0xE0..EF):
 
 for compressed, make it always authenticated? to check correctness
 
+TBD 09.11.24 from perspective of retransmiting fragments after MTU drop, looks
+like every TSN must have it's *own* *options* inside - if it has timestamp, or
+authenticated, or these are inherited from packet one's
 
 -- /variant 20
 
@@ -3109,6 +3112,9 @@ no, let's think TSN layer provides us with full 20 bits, so Add to full msgid
 have to be at most 10 bit.. may be shifted?
 or 2-bit Add as method number, default method 0 is low bits of stream num
 
+TBD 09.11.24 (see also this day) if we are going to options inside TSN chunk,
+then DUP/tv_sec/tv_usec and possibly Add may be provided by TSN layer in
+options?
 
 userLength/offset are possible even in single block, e.g. continue small tail
 from previous sess
@@ -4800,6 +4806,22 @@ TBD drop codes 8-11 for extension - time/PacketCounter, instead of PkCntWrap?
 TBD 26.10.24 ~6:00 moving average histogram of packet sizes on receiver - to
 report to sender for MTU change detection/recovery
 
+TBD 06.11.24 https://datatracker.ietf.org/doc/draft-ietf-tcpm-accurate-ecn/30/ :
+<< *  an essential part that re-uses the TCP-ECN header bits for the
+      Data Receiver to feed back the number of packets arriving with CE
+      in the IP-ECN field.  This provides more accuracy than Classic ECN
+      feedback, but limited resilience against ACK loss;
+   *  a supplementary part using one of two new alternative AccECN TCP
+      Options that provide additional feedback on the number of bytes
+      that arrive marked with each of the three ECN codepoints in the
+      IP-ECN field (not just CE marks).  This provides greater
+      resilience against ACK loss than the essential feedback, but it is
+      currently more likely to suffer from middlebox interference.
+>>
+TBD 07.11.24 ~02:15 use CoAP options format: first nibble may have extended packet
+info from IPnh, other for run length
+RFC 3124 (Congestion Manager) - ownd, stream scheduler //move to QoS stream?
+
 4.20. FRAGMENT.
 
   Используется в тех случаях, когда после изменения пути, например, отказе
@@ -5331,6 +5353,35 @@ RFC 8724:
 TBD if ack is lost, then SCHC has ACK-REQ by sender's timeout
 
 -- /variant Packet Counter
+
+-- variant Packet 09.11.24 (see also this day): combine variants Packet 2.1
+and packet 3 with err-codes from variant Packet Counter, but with no separate
+packet headers as this is virtual packet - just TSN base as fragment ID and
+Shared Key ID for AUTH - everything else is done by options 0-4 (only these
+allowed) like in usual packet, and virtual packet is built like a usual
+packet, just with extra TIMESTAMP/AUTH/etc. options (DUP info), as it would be
+with usual physical retransmission packet on a link with bigger MTU...
+
+     0                   1                   2                   3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |  Base Transmission Sequence Number, serving as a fragment ID  |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |FLAEC|PacketLen/Offset/CumulACK| Data...
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+...
+
+   0 - first, Shared Key ID Len = 1 byte
+   1 - first, Shared Key ID Len = 2 bytes
+   2 - first, Shared Key ID Len = 3 bytes
+   3 - middle
+   4 - last
+   5 - sender error code
+   6 - receiver: ack
+   7 - receiver: error code
+
+TODO errcodes, copy paragraph about advertised Fragment Reassembly Buffer etc.
+
+-- /variant Packet 09.11.24
 
 4. NAK
 
@@ -7511,6 +7562,22 @@ the reasons of SSN to exist is to:
   -> must take to account in impl that (B) chunk could have gone away coz wrapped
 if get rid of SSN, then abandoning must be on Time-based IDs - 8 bytes vs VarNibble,
 and what to do with Unordered?
+
+- 04.11.24 actually it's the opposite: TSN exists just for handy combined SACK,
+  but conceptually (in ideal like TCP-3 Internet) there are many undirectional
+  connections, like DCCP, VMTP [RFC 1045] or RDP [RFC 908]; and each can be
+  divided into messages, and messages (e.g. up to 4 Gb) are having offsets to
+  be fragmented by routers like in TCP-3 - now, we (and SCTP, and QUIC) combine
+  all that streams into single association just for 2 purposes: mainly, common
+  congestion control, and secondarily (as QUIC can't), multiple network paths,
+  especially if simultaneously (each having it's own congestion control),
+  reminding disks joined to zpool's and then divided to zfs filesystems. In
+  such ideal Internet, these independent connections will still have
+  independent numbering inside them, just getting help from network in form of
+  some theoretical CCCP (Combined Congestion Control Protocol)...
+  - 06.11.24 DCCP [RFC 4340] mentions RFC 3124 (Congestion Manager) with
+    a seeds of similar idea, but that describes just needed API and never went
+    to wire or newer/pluggable CC algorithms...
 
 if SSN is to be replaced by just Time-based ID, then problem after with (B)
 after silence - were there some intermediate messages or not? What if silence
