@@ -220,6 +220,10 @@ top-level in hier?
 
 top-level: mb 4. for IPv4, 6 for IPv6, 11..17 for telephone codes like +7... ?
 
+   Address allocation ot top of tree is supposed ot be "RIR.LIR.provider", or
+   more precisely, top number being continent or some other type, e.g. 4. for
+   IPv4 and 10. for private networks.
+
 - variant: shortcuts for 4 one-byte elements and 8 two-byte elements
   so 4.200.200.200.200 for IPv4 and 34.200.200.200.200 generic both could
   take 6 bytes; same for MAC / EUI-64 ?
@@ -640,7 +644,7 @@ TODO
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |IHL=L3.5 Offs|   L4 Protocol   |Flags|E2E Opts Len | SIL | DIL |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |Hop Limit (TTL)|SimplRoutContxt|    SAL    |    DAL    |L3.5Len|
+   |Hop Limit (TTL)|Routing Context|    SAL    |    DAL    |L3.5Len|
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                                                               |
    . Next Hop / Forward Route Instructions - to NHL words boundary .
@@ -727,6 +731,16 @@ addresses/options; also CW for coloring word as also addition to length
   - TBD 03.11.24 or put into IHL real offset to some part e.g. end of
     identifiers? better for entire header to have 1-byte-described length,
     even better to fit into one mbuf
+TBD 20.11.24 ~02:20 NAIR - Nibbles/Nested Arrays of Integers Representation, like CBOR:
+  0 - number 0 and false
+  1 - number 1 and true
+  2..9 - integer of n-1 nibbles - so 2^32 max
+  a - array of 0 elements
+  b - array of 1 elements
+  c - array of 2 elements
+  d - open '[' for indefinite-length
+  e - reserved for extension in next nibble
+  f - closing ']'
 
   DIL and SIL: 3 bits each
 
@@ -736,6 +750,16 @@ addresses/options; also CW for coloring word as also addition to length
     short option in "Every fragment options", but by default is SipHash-2-4-128
     with a key being "IPnh\0\0..." (four characters "IPnh "padded by number of
     zeroes required by algorithm).
+
+    Note that Host ID can be unambiguously calculated from full address only
+    if host has only one address (one provider for organization). Otherwise,
+    it SHOULD be always included.
+
+    Valriable length for Host ID is intended for possibility of hierarchy:
+    organization's ID, sub-organization(s) ID, host with organization ID. So
+    with 32-bit values it is possible to have up to 6 organiztion levels (for
+    support of merge/acquire, etc.). However, transport protocols should view
+    IDs as just opaque bytestring.
 
 TBD 03.11.24 put MTU into On-Path field when gets fragmented by router
 
@@ -766,6 +790,14 @@ TBD 18.09.24 may be 1..17 bytes? enough for "tag+IPv6" Aug2024 TBDs in 2.3.1
   but needed for error-checking, HCver for constrained nodes will have
   different encoding
   - or still limit and give some values for escape?..
+    - 19.11 probably escape should be not "complete 6.ip6:addr:from:root" but
+      rather shortcuts "here 4 single-byte ints/levels" or "8 16-bit levels"
+      if, for example, future will need another global prefix than 6, or there
+      will be other protocols - so for applications in sockets it's always full
+      address in usual form, it's just wire compression at lower stack levels?
+  - 19.11 make a paragraph about `struct sockaddr_storage` (<128) and apps
+    compatibility so size limited (& to leave space for service names) and
+    UTF-8 here also familiar to app developers
 
     Note that addresses in packet are always relative to their common prefix
     from root of the tree, even if that prefix is of null length (in this
@@ -817,12 +849,22 @@ and has the same "is zero" property on check if correct
     could all use single value in this field, making variable-length
     addressing not slower, but even faster than traditional CIDR.
 
-  SimplRoutContxt:  8 bits.
+  Routing Context:  8 bits.
 
     Used for simplified routing schemes inside a controlled administrtive area
     where full routing protocol is not running and thus Next Hop words are
     absent. This field is expected to include some packet level or distance
     and thus changed at every hop, so it is placed near TTL.
+
+    This field may be used with or without Next Hop. If in combination, it may
+    serve as a "Content-Type" for Next Hop and/or some pointer within it.
+
+    From security point of view, both Routing Context and Next Hop SHOULD be
+    cleared to zero before delivering to final destination host, to prevent
+    malicious cooperating hosts from guessing values to influence decisions on
+    a (mis)configured first accepting router. If performance of such process
+    is very crititcal but Next Hop is cryptographically verified, then it's
+    usually enough to zero out just some bytes (one per several).
 
 TBD
 
@@ -1056,6 +1098,9 @@ TBD define like in SCTP or CoAP or IPv6 [RFC 8200] rethink 10 & 11 about multica
 
 TODO 16.11.24 by https://www.ietf.org/archive/id/draft-herbert-6man-eh-attrib-03.txt
 
+TODO mapping of options to generic CBOR - e.g. attribution with following it
+is nested array/map
+
 2.3.3.3. Checksum option - number 2.
 
    Contains checksum, CRC32 or other checking value (may be even cryptographic
@@ -1136,6 +1181,15 @@ TODO
    some (presumable border) routers, not all of them. This also means presence
    of Traffic Class / Flow Label for them, where, again, Flow Label is a part
    of fragment identifier.
+
+TODO 17.11.24 these should be moved back from binary to CBOR again, because
+this defeats the whole purpose of universal format instead of customary
+binary. What should be moved out of CBOR to binary is - authenticated parts,
+that is, IPv6 in [RFC 8200] defined "chg" flag for options - what could be
+changed in transit so that Authentication Header will not include them to not
+fail. Thus, there should be multiple CBOR chunks, possibly "mounted" into
+main? Also, while here, compression should be made from single entry to
+(possibly empty) stack
 
     0                   1                   2                   3
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
