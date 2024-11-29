@@ -588,6 +588,8 @@ DSCP/Label as for compatibility with current IPv4/IPv6 ?
   ...should we allow all IPnh implementations MUST support ECN, so that absence
   of L3.5 part, meaning all fields equal to default zero, may be "fixed" by
   transit router by inserting this word with CE value?
+TBD 26.11.24 (see this day) a bit L for larger identification here? or it will
+be difficult to find extended fragment Identification
 
   R:  1 bit
 
@@ -984,8 +986,69 @@ fragmentation is allowed (DF=0... so ternary?)
    * FrL as "DF or preferred copy length or, if Frg>0, actual copy length"
    * Frg: unfrag, nonfirst frag, first without copy (payload reachable), and
      first with copy e.g. too long Options Part which is also fragmented
+     (two bits: First, Copy present)
    * for first frag, 16 bits of total length after reassembly
    * for later frags, MF, Resereved bit and Fragment Offset
+   * there MUST be full FrL of payload available: e.g. if options and MTU is
+     such that FrL requested 3 but only 1 word of payload is left, then
+     options part is also split so that first frag will have desired copy;
+     packets which does not meet this criteria MUST be discarded as invalid
+     due to security concerns
+
+-- variant 26.11.24 two sizes - small and large for new transport protocols?
+
+L - for large size / L4 controlled
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |S|M|       Fragment Offset     |         Identification        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   .  Copy of first fragment payload's first 0, 1, 2 or 3 words    .
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |1|R|IWL|D|M|Hi |                  Fragment Offset              |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   .                  Identification, IWL+1 words                  .
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   . Copy of first fragment payload's first 0, 1, 2 or 3 (D)words  .
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   IWL - how many words in Identification, which is completely set by L4
+   protocol
+
+   D - copy of payload is measured in double words (8 byte units)
+
+   M - more fragments follow
+
+   Hi - with Fragment Offset forms Total Length if this is very first fragment
+   (by Frg)
+
+XXX with dwords it may be up to 44 bytes, leaving only 16 for balancer - do we
+need it? IWL for Identification controlled by L4 is extension by itself
+
+TBD why length only in first fragment? repeat it in every, for both
+possibility of ICMP "too large" on any frag and like "Jumbogram" IPv6 length?
+- or do this length in every-fragment "Jumbo Length" short option?
+
+TBD 27.11.24 huh, what to do with unfragmented (yet) packets, especially when
+Identification is L4-controlled? then it must *always* present as intermediate
+router don't know what to put into Identification (which is possible when it's
+just 16 bit auxiliary field)... so Jumbograms can exist in only fragmented
+form? and goal was for like TCP-3 but generic when routers don't have to parse
+every protocol (TCP-3 has BOS and EOS flags in addition to BOL and EOL)
+
+-- /variant 26.11.24
+
 
 TODO
 
@@ -1058,7 +1121,7 @@ TODO
     0                   1
     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   |Mnd|C|Option number| Option length |Pad|
+   |Mnd|Pad|C|Option number| Option length |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
      Mnd - whether it's mandatory to support or skip and/or report
@@ -1070,6 +1133,9 @@ TBD define like in SCTP or CoAP or IPv6 [RFC 8200] rethink 10 & 11 about multica
      Option length - value length in bytes
 
      Pad - pad after option value, in bytes
+
+     (subfields are in order allowing more easily manually decode them
+     visually observing in hexdump)
 
    Unused space is simply set to all zeroes - effectively being zero-padding
    options. If some option requires more than word alignment, so that Pad must

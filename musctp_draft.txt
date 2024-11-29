@@ -7453,6 +7453,10 @@ TODO
 Appendix R.T. Research on Timestamps / TSN.
 
 may-be goals - hierarchy of streams, get rid of non-aesthetic fragments
+- 22.11.24 if we are comparing to ZFS then tree of streams is natural, may be
+  even humanly *name* them?
+  - the problem is, how to report such streams in API-s? it will typically be
+    just 2 or 4 byte integer
 
 * it could be made without TSN - observe we our ID is based on Timestamps
 * also, the main reason for TSN to exist is for simple and compact SACK
