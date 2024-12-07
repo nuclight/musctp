@@ -138,6 +138,17 @@ BTW, in muSCTP `ServInstNum` is (independent) idea of something similar to
 those independent sockets in Van Jacobson's talk.
 <<It is, he says, simply the end-to-end principle in action yet again. This principle, which says that all of the intelligence in the network belongs at the ends of the connections, doesn't stop at the kernel. It should continue, pushing as much work as possible out of the core kernel and toward the actual applications.>>
 
+TODO 30.11.24 paragraph about OSI wrong and new (sub)Layers: 2.4 - ARP,
+2.6 - Forwarding, 3.4 - ICMP, 3.5 - Packetization
+- TBD separate bit for ICMP ? and combine DHCP into ICMP ? ICMP doesn't need
+  fragmentation and E2E Options - reuse fields?
+  - but `ping` is used for fragmentation tests also
+    - use new ECHO protocol instead of free'd ICMP entry?
+      - or DIAGNOSE/SIMULATE ? not only echo, but also discard, mb other replies...
+        - yes, this is really better then ICMP Echo, because you can't receive
+	  ICMP to ICMP, e.g. "MTU exceeded" for 2000 byte DF ping
+        - 01.12 seems it's ERR.. may be UDP echo/discard ports are better?
+
 2.1. Overview of packet and main concepts.
 
    IPnh packet has the following general structure:
@@ -204,6 +215,35 @@ TBD comparison with HIP (Host Identity Protocol), RFC 4423
 and with LISP (Locator/ID Separation Protocol), RFC 6830
 
 TBD draft-herbert-intarea-ila-01 : anycast, SIR prefix, ILA domain
+
+TBD 30.11.24 Shim6, as defined in [RFC5533]: Section 6.6 of RFC 9049 lists <<that the problem being addressed was "site multihoming", but Shim6 was providing "host multihoming". That meant that the decision about what path would be used was under host control, not under edge router control. [...] that operators were performing traffic engineering on traffic aggregates. With Shim6, these operator traffic engineering policies must be pushed down to individual hosts.>> -- and 6.6.3 addendum (on prohibiting users to do market economy choices) is very funny:
+<<6.6.3. Addendum on Multipath TCP
+
+During discussions in the PANRG session at IETF 103 [PANRG-103-Min], Lars Eggert, past Transport Area Director, pointed out that during charter discussions for the Multipath TCP Working Group [MP-TCP], operators expressed concerns that customers could use Multipath TCP to load-share TCP connections across operators simultaneously and compare passive performance measurements across network paths in real time, changing the balance of power in those business relationships. Although the Multipath TCP Working Group was chartered, this concern could have acted as an obstacle to deployment.
+Operator objections to Shim6 were focused on technical concerns, but this concern could have also been an obstacle to Shim6 deployment if the technical concerns had been overcome.
+[...]
+6.7.1 [...]
+Operational Aspects: NSIS not only required trust between customers and their provider, but also among different providers. In particular, QoS signaling techniques would require some kind of dynamic SLA support that would imply (potentially quite complex) bilateral negotiations between different Internet Service Providers. This complexity was not considered to be justified, and increasing the bandwidth (and thus avoiding bottlenecks) was cheaper than actively managing network resource bottlenecks by using path-coupled QoS signaling techniques. Furthermore, an end-to-end path typically involves several provider domains, and these providers need to closely cooperate in cases of failures.
+>>
+- 05.12.24 (see also this day) capitalism is over, so
+  "Возможность переиспользования полосы, на которой все и зарабатывают (благодаря чему IP и выстрелил), при этом сохранялась. [...] до установки TCP сессии или до начала обменом данными, конечные хосты отправляют RSVP Path с указанием требуемой полосы [...] требует ненулевых затрат CPU и памяти на каждом транзитном узле, а также откладывает фактическое взаимодействие на некоторое время" [https://linkmeup.gitbook.io/sdsm/15.-qos/1.-tri-modeli-obespecheniya-qos/1-intserv]
+  is now should be viewed from only technical side (scalability etc.), not
+  business
+- 07.12.24 technically, pushing policy information to end hosts is problematic
+  due to needs for Host software updates, and this is different administrative
+  boundaries than network's routers. Thus, we have only provider-aggregated
+  addresses, but force that host MUST reserve space in header for longest of
+  prefixes (if packet goes outside) for router to be able to rewrite source
+  IPnh address (for controlling return channel traffic). As mobility is
+  inherent in IPnh and every Host MUST accept packets with it's destination
+  HostID, regardless of destination IP address (still analogy with paper mail,
+  Host is human but address is just location), everything will work - so we
+  will have PA addresses only. Note that ability to regulate return-traffic on
+  a per-packet basis gives network administrator even more control on channel
+  load than possible in BGP4 with PI addresses, where granularity for the same
+  (PI) IP subnet, by path-prepending, is per-destination AS at best, if not
+  per-provider channel only like "this ISP is primary and this is backup".
+
 
 2.1.2. Addresses: hierarchy, compatibility, extensibility.
 
@@ -421,6 +461,9 @@ TBD 04.11.24 uni-flow TCP3-like, CCCP and RFC 3124 (Congestion Manager):
    the face of congestion than a single TCP connection implementing
    standard TCP congestion control and avoidance [Balakrishnan98].
 >>
+- 05.12.24 see CCCP block (now Centralized Congestion Control ) in musctp_draft.txt,
+  as capitalism is over, RSVP/IntServ may be resurrected on new level; primary goal
+  is consolidated network: "социализм возможен в одной, отдельно взятой, сети"
 
 ===
 RFC 3649:
@@ -442,6 +485,55 @@ RFC 950:
 
 
 TBD
+
+2.1.2.1. Packet exchange with current Internet - transition.
+
+   This is, of course, done via NAT. For IPnh networks, IPv4 and IPv6
+   addresses look simply like in a subtree - e.g. as 4.1.2.3.4 for IPv4
+   address 1.2.3.4 or 6:2001:db8:85a3:8d3:1319:8a2e:370:7348 for IPv6
+   address (it is also possible that provider/organization will use not global
+   prefix 4. or .6 but with some local prefix prepended to it, for users to
+   save some bytes in header by not needing to specify path from root,
+   especially if more than one prefix is assigned). So IPnh host software does
+   not require changes except at DNS resolving - knowing that A should be
+   actually prepended with (provider_prefix.)4. and (provider_prefix.)6. for
+   AAAA records. Then NAT at nearest router knowing route to those prefixes
+   does translation only of L3 headers, subject to well known rules. Note that
+   no dual-stack on IPnh host is required, except may be for binary
+   compatibility with older applications compiled for AF_INET/AF_INET6.
+
+   For IPnh going as clients to outside IPv4, things look much the same as if
+   were just IPv4 clients on a typical gray network - NAT will translate their
+   addresses to some public IPv4 addreess(es).
+
+   For later times, e.g. when most of Internet migrated to IPnh, or there just
+   some IPv4-only devices in an environment of IPnh, the opposite NAT is
+   taken: at IPv4 router, being border router for this IPv4 subnet, runs a NAT
+   and DNS interceptor instance. The DNS resolver, which must be only resolver
+   configured for these IPv4-only hosts, translates IPnh DNS address records
+   into A records in the 26.0.0.0/8 network and installs corresponding mapping
+   into the NAT engine. Outgoing packet to 26/8 then routed to NAT and gets
+   translated to IPnh address, and vice versa.
+
+   Of course, this supports only outgoing connections via DNS and requires DNSSEC
+   disabled, but DNSSEC is brain-damaged anyway (see e.g. DNSCurve for better
+   alternative). However, this covers vast majority of use cases achieving
+   interconnectivity between address families WITHOUT any modification of host
+   software - something IPv6 failed to do, thus being major slow-down factor
+   for IPv6 deployment even in the era when all IPv4 address space is
+   exhausted at RIR level.
+
+   As there is only /8 "stolen" IPv4 network for translation needs, this
+   limits connectivity from IPv4 "island" to only about 16 millions of IPnh
+   hosts simultaneously, so it is expected that this translation will be
+   deployed at CGNAT level or below. Note that such IPv4 "island" continues to
+   retain connectivity with all other public IPv4 space, so transition can be
+   gradual and painless.
+
+   The same technique could be applied to IPv6, just selecting larger prefix
+   for translation - or, as vast majority of current IPv6 hosts are
+   dual-stack, only IPv4 part may be selected for deployment, saving
+   development hosts.
 
 2.2. Common parts of all headers.
 
@@ -511,6 +603,12 @@ required...
    (A second variant in [KSEPA04] does not depend on cumulative
    congestion statistics from the network.)
 -- and other listed in Appendix A there are interesting
+02.12.24 there referenced MaxNet (e.g.
+http://web.archive.org/web/20060909055743fw_/http://netlab.caltech.edu/maxnet/MaxNet_Implementation_TechReport.pdf)
+looks more promising than XCP: very simple implementation in router, jsut
+3 byte `price` and `echo` fields, but unstable to packet loss and still no malicious
+protection (XCP also hasn't)
+
 - 22.10 also checksum for very short:
 ===<<
 Cohen & Postel                                                  [page 1]
@@ -628,6 +726,12 @@ be difficult to find extended fragment Identification
   Flow Label:  20 bits.
 
     Same as in IPv6.
+
+TBD 30.11.24 RFC 6437 essentially defines flow label as a crutch against
+fragmentation, even examples as hash function (von Neumann) from 5-tuple
+(BTW this function may be useful in other contexts, not this header), or
+another application is for flows outside of IPsec (where full is hidden)
+so it's probably doesn't make sense to expand this field
 
 TODO
 
@@ -1046,6 +1150,18 @@ router don't know what to put into Identification (which is possible when it's
 just 16 bit auxiliary field)... so Jumbograms can exist in only fragmented
 form? and goal was for like TCP-3 but generic when routers don't have to parse
 every protocol (TCP-3 has BOS and EOS flags in addition to BOL and EOL)
+
+TBD night to 30.11: instead of IWL and dwords, simply give 3 bits to FrL and
+move that information there, instead of Identification, if L4 protocol wants
+so; however, this:
+- leaves less than half space to L3.5: 15 words minus (7+1+1) = only 24 bytes
+- solvable if FrL is total including offset/id: even better for Jumbo bit
+  format parsing, but unbeautiful that in non-DF case it now does not match
+  number of words to copy
+  - 04.12.24 let's FrL be still words to copy, but preceding is always one
+    word: that is, no separate Identification in Jumbo case, assuming this
+    will be used by protocols knowing what they do (having unique Packet Id in
+    first at most 28 bytes)
 
 -- /variant 26.11.24
 

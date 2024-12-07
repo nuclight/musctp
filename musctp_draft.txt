@@ -32,6 +32,11 @@ This procedure was first proposed by D. D. Clark and David L. Tennenhouse.[1] It
   *  The ADUs can be processed in any order.
   *  The lower layers keep the ADU borders.
 
+30.11.24 descrive that L4 knowing how many bytes app wants to transmit is
+beneficial for things like scheduling over multipath and e.g. Section 6.3.1 of
+RFC 9049 describes why Quick-Start should be for bulk flows
+
+
 [QUIC-APPLICABILITY]:
 in comparison to QUIC, muSCTP does not need fallback protocol, tunnels are for this
 
@@ -4822,6 +4827,39 @@ TBD 07.11.24 ~02:15 use CoAP options format: first nibble may have extended pack
 info from IPnh, other for run length
 RFC 3124 (Congestion Manager) - ownd, stream scheduler //move to QoS stream?
 
+-- 02.12.24 CoAp option-like format:
+
+     0   1   2   3   4   5   6   7
+   +---------------+---------------+
+   |               |               |
+   |  Packet State |  Run Length   |   1 byte
+   |               |               |
+   +---------------+---------------+
+   \                               \
+   /     Packet State Length       /   0-2 bytes
+   \          (extended)           \
+   +-------------------------------+
+   \                               \
+   /          Run Length           /   0-2 bytes
+   \          (extended)           \
+   +-------------------------------+
+   \                               \
+   /                               /
+   \                               \
+   /      Packet State Value       /   0 or more bytes
+   \                               \
+   /                               /
+   \                               \
+   +-------------------------------+
+
+      0
+      0 1 2 3 4 5 6 7
+     +-+-+-+-+-+-+-+-+...
+     |DupCn|Value Len| Something seriously wrong with this idea (!B) not continue
+     +-+-+-+-+-+-+-+-+...
+--/02.12.24
+
+
 4.20. FRAGMENT.
 
   Используется в тех случаях, когда после изменения пути, например, отказе
@@ -7582,6 +7620,10 @@ and what to do with Unordered?
   - 06.11.24 DCCP [RFC 4340] mentions RFC 3124 (Congestion Manager) with
     a seeds of similar idea, but that describes just needed API and never went
     to wire or newer/pluggable CC algorithms...
+  - 30.11.24 Section 6.4.2 of RFC 9049 about trust model was different for
+    ICMP Source Quench to work
+  - 05.12.24 s/Combined/Centralized/, and as capitalism is over, RSVP/IntServ
+    may be resurrected on new level (solving technical problems e.g. delay)
 
 if SSN is to be replaced by just Time-based ID, then problem after with (B)
 after silence - were there some intermediate messages or not? What if silence
