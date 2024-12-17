@@ -327,17 +327,19 @@ TODO
    index of string in array) with bytestring dictionary, applications may also
    choose to just refer to some dictionary defined in other place, by
    specifying it's hash for error checking. This is similar to specifying
-   CRC-32 / Adler-32 checksum of deflate dictionary in zlib library.
+   CRC-32 / Adler-32 checksum of deflate dictionary in zlib library, or in
+   LZ4 frame.
 
 TBD correct CDDL syntax
 
    CBAR-CBOR = #6.10([atoms, bytedict, CBAR, checksum])  ; Tag 0x0a for "Atom"
+             / #6.10(CBAR)    ; binary string - everything other setup earlier
 
    atomarr = [ + bstr ]
 
-   ? atoms = atomarr / uint / bstr,  ; atoms array or their hash
+   atoms = atomarr / uint / bstr,    ; atoms array (mb empty) or their hash
    bytedict = bstr / uint,           ; byte dictionary (mb empty) or it's hash
-   CBAR = bstr .size (1..),
+   CBAR = bstr .size (9..),
    ? checksum = uint
 
 TBD may be RFC 6920 ?
@@ -804,5 +806,207 @@ TBD what if use simple(0)..simple(15) for first atoms? so mb change varint to 24
   setup, that is, InternAtom/GetAtomName/ReleaseAtom
   - use VarNibbles record format there? differentiate CBAR and CBAP?
 
+=== 15.12.24:
+
+packing of CBOR sequences - cbor-packed not, CBAR allows
+
+pre-setup - possible e.g. as CBOR sequence
+TBD use 22098 for recursive "after unpacking, there are more CBAR inside"?
+TBD alternatives (tag 121) for multiple dictionaries?
+
+  The format is described in terms of unpacker copying data from input to
+  target unpacked CBOR which later can be feed to generic CBOR decoder,
+  however, it is possible, though hard, to implement in-place access to
+  CBAR data (like in draft-cbor-packed), if application wish so and is
+  constrained in RAM but not ROM.
+
+in atom table - allow #6.10 for CBAR as atom definition, that is, to reference
+earlier atoms
+
+   CBAR-CBOR = #6.10([atoms, bytedict, CBAR, checksum])  ; Tag 0x0a for "Atom"
+             / #6.10(CBAR)    ; binary string - everything other setup earlier
+
+   atomarr = [ + atom ]       ; "atom" is like in X11 sense - number of string
+   atom = bstr                ; raw value
+        / #6.10(bstr)         ; itself CBAR - definition uses previous atoms
+	/ any                 ; valid CBOR fragment to substitute
+
+   atoms = atomarr / uint / bstr,    ; atoms array (mb empty) or their hash
+   bytedict = bstr / uint,           ; byte dictionary (mb empty) or it's hash
+   CBAR = bstr .size (9..),
+   ? checksum = uint
+
+In atom definitions, each definition MUST use only prior atom numbers if it's
+CBAR itself.
+
+original: 78 32 "http://192.168.1.103:8445/wot/thing/MyLED/ledOnOff"
+226("ledOnOff") == D8 E2 68 'ledOnOff'
+                   7E 32 FD nn FC 08 'ledOnOff'
+
+why extended code to enter IN_BLOB ? enter on usual tstr/bstr and *scan*:
+78 32 FD nn 'ledOnOff'
+
+for map merging, tag 63 Encoded CBOR Sequence may be used,
+cbor-records 57342-57599 also instead of tag 114
+
+  Opcodes of IN_BLOB state:
+
+  C0             - Atom 0
+  C1             - Atom 1
+  F5             - Atom 2
+  F6             - Atom 3
+  F7             - Atom 4
+  F8             - Atom 5
+  F9             - Atom 6
+  FA             - Atom 7
+  FB             - Atom 8
+  FC <VarUInt30> - Copy N Literal bytes, N MUST be greater than 1
+  FD <VarUInt30> - Decompress (dispense) atom N
+  FE             - Escape next byte (Copy 1 literal byte)
+  FF             - Copy remaining_bytes literal bytes
+  any other byte - Output this byte
+
+  Any output operation decrements `remaining_bytes` variable by the size of
+  chunk output, and in well-formed input it MUST not became less than zero.
+  If `remaining_bytes` became zero (0), state is changed to IN_CBOR.
+
+  Rationale: UTF-8 since updated RFC can't encode codepoints higher than
+             0x10FFFF, thus bytes higher than 0xF5 can't appear in well-fromed
+	     UTF-8, and 0xC0 and 0xC1 also must not appear in conforming
+	     UTF-8, thus these bytes could be used inside CBOR Major Type 3
+	     (string) without escaping, as atoms often will be part of text
+	     strings, not only binary. For applications wanting to trade-off
+	     performance to compression ratio, every other byte means itself
+	     which allows to scan contents of text string byte-by-byte, saving
+	     few bytes - instead, for performance of decoder, FC code with
+	     length should be used, allowing to skip to next code.
+
+  Opcodes of IN_CBOR state:
+
+  1C <3 bytes>   - (terCio) Output 1A 00 <3 bytes>
+  1D             - Atom 0
+  1E             - Atom 1
+  1F <5 bytes>   - (Five) Output 1B 00 00 00 <5 bytes>
+  3C <3 bytes>   - (terCio) Output 3A 00 <3 bytes>
+  3D             - Atom 2
+  3E             - Atom 3
+  3F <5 bytes>   - Five-integer: Output 3B 00 00 00 <5 bytes>
+  5C <VarUInt30> - Convert atom N to binary string
+  5D             - Atom 4
+  5E             - Atom 5
+  7C <VarUInt30> - Convert atom N to text string
+  7D             - Atom 6
+  7E             - Atom 7
+  9C             - Atom 8
+  9D             - Atom 9
+  9E             - Atom 10
+  BC             - Atom 11
+  BD             - Atom 12
+  BE             - Atom 13
+  DC             - Atom 14
+  DD             - Atom 15
+  DE             - Atom 16
+  DF             - Atom 17
+  FC <VarUInt30> - Copy N Literal bytes, N MUST be greater than 1
+  FD <VarUInt30> - Decompress (dispense) atom N, N>17
+  FE             - Extended functions (reserved)
+
+  Decoder in IN_CBOR state expects same codepoints as in standard-conformant
+  CBOR, plus actions from the table above. That is, on every standard element,
+  it's length analyzed, and, for all opcodes except strings, corresponding
+  number of bytes is output without interpreting - that is, these opcodes are
+  meaningful only at start of CBOR element, or compressed substitution of that
+  element, and not significant inside them (as in CBOR itself).
+
+  For standard CBOR text and byte strings opcodes, after output of element
+  header, decoder initializes `remaining_bytes` variable to length of element
+  contents and switches to IN_BLOB state with other opcode set, leaving it
+  back to IN_CBOR state when element is finished.
+
+  For example, consider text string "foobarbaz1foobarbaz2foobarquux". It has
+  CBOR encoding - original uncompressed text - as:
+
+    78 1E 666F6F62617262617A 31 666F6F62617262617A 32 666F6F62617271757578
+
+  Suppose atom number 20 has value "foobarbaz" and atom number 3 value
+  "foobarquux". Then in CBAR form it will be:
+
+    78 1E  FD 14  31  FD 14  31  3E
+
+  Here, decoder sees standard CBOR prologue of 30-byte text string, outputs
+  it, initializes `remaining_bytes` variable to 30 (0x1e) and goes to IN_BLOB
+  state. Then it sees FD command to output atom, which argument is 0x14,
+  decimal 20 (in our example numbers are small enough for VarInt to fit in
+  a byte). It outputs contents of atom 20, and decrements `remaining_bytes` by
+  length of atom, 9. Then it sees plain 0x31 byte, outputs it, decrementing
+  `remaining_bytes` by 1. Process repeats with next atom and byte 0x31.
+  Finally, there is 0x3E, short single-byte opcode for atom 3, which is output
+  and `remaining_bytes` variable reaches 0 as length of atom 3 matches it. So
+  decoder exit IN_BLOB state and expects start of next CBOR element after this
+  string.
+
+  Note that FC and FD opcodes are same in both states. This is two-fold: it
+  allows CBAR to skip over (copy as is) new CBOR opcodes, conflicting with
+  CBAR, if such will appear in the future, and - more importantly - it allows
+  to paste atoms or literals as CBOR fragments. For example, this allows for
+  CBOR sequences or copying incomplete CBOR structures, like fragments of
+  unclosed (unfinished) array or maps. It is possible because on each step,
+  decoder do not check CBOR to be structurally valid (though it SHOULD do so
+  for final document) - it just expects next CBOR element and nothing more.
+
+  Opcodes 5C and 7C used for "type conversion": as atoms are binary strings,
+  often it's common for entire CBOR element to consist of single atom. In this
+  case, specifying length and then going to IN_BLOB state emits more bytes and
+  processing, because length of atom is already known. Thus, e.g. 7C and atom
+  number is converted on output to proper CBOR element header of atom length,
+  folowed by atom contents. For example, if atom 13 is "outputData", then
+  7C 0D is expanded to 7A 6F 75 74 70 75 74 44 61 74 - 7A corresponds to
+  length of 10 bytes of atom contents.
+
+  Tag #6.10 may be applied not only to entire array (which is logically
+  substituted to enclosing CBOR after uncompressing) but also to binary
+  string. This is used for atom setup table to use previously defined atoms.
+  If an atom is simple CBOR element or structured construct, the it's content
+  is not processed, just used as-is. If atom is bstr (Major Type 2) with tag
+  #6.10, then it's contents processed (and expanded value then used) by the
+  same CBAR unpacking process - but decoder start state is IN_BLOB (instead of
+  IN_CBOR for main CBAR) with `remaining_bytes` initialized to infinity and
+  error on premature end of input is suppressed. Atoms allowed inside decoding
+  such atom are only those atoms defined earlier in this array.
+
+#6.10([
+  /atoms/[
+    "rgbValue",    #6.10(#2.11 C0 "Red"), #6.10(#2.13 C0 "Green"),
+  / 0 (9 bytes)    1 (CA 4B C0 52 65 64)   2 (8 bytes)  /
+
+    #6.10(#2.12 C0 "Blue"), "http://192.168.1.10",
+  /  3 (7 bytes)            4 (20 bytes)            /
+
+    #6.10(#2.35 5D "3:8445/wot/thing"), #6.10(#2.42 5E "/MyLED/"),
+  /  5 (CA 58 23 5D ..-> 20 bytes )       6 (CA 58 3A 5E ..-> 11 bytes) /
+
+    "name", "@type", "links", "href", "mediaType", "application/json",
+  /  7 (5 b)  8 (5 b)  9 (6 b) 10 (5 b)  11 (10 b)   12 (17 b) /
+
+    "outputData",   "valueType",   "type",      "writable",
+  / 13 (11 bytes)   14 (10 bytes)  15 (5 bytes)  16 (9 bytes) /
+
+    #6.10(#6.63(#2.18 "outputData": { "valueType": { "type": "number" } } )),
+  / 17 (CA D83F 52 6F FD0D A1 49 FD0E A1 44 FD0F 46 6E756D626572 -> 22 b) /
+
+    ["Property"],                  "colorTemperatureChanged",
+    / 18 (81 48 68 ..-> 10 bytes)  19 (24 bytes) /
+  ],
+  /bytedict/"",
+  /CBAR/#2.xxx<
+  
+  ...TODO
+
+  / "outputData": { "valueType": { "type": "boolean" } } /
+    7C 0D        A1  7C 0E      A1 7C 0F  67 626F6F6C65616E
+
+  ...TODO
+  >
+])
 
 TODO
