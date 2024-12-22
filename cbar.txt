@@ -823,7 +823,7 @@ TBD alternatives (tag 121) for multiple dictionaries?
 in atom table - allow #6.10 for CBAR as atom definition, that is, to reference
 earlier atoms
 
-   CBAR-CBOR = #6.10([atoms, bytedict, CBAR, checksum])  ; Tag 0x0a for "Atom"
+   CBAR-CBOR = #6.10([atoms, bytedict, CBAR, ? checksum])  ; 0x0a for "Atom"
              / #6.10(CBAR)    ; binary string - everything other setup earlier
 
    atomarr = [ + atom ]       ; "atom" is like in X11 sense - number of string
@@ -831,13 +831,31 @@ earlier atoms
         / #6.10(bstr)         ; itself CBAR - definition uses previous atoms
 	/ any                 ; valid CBOR fragment to substitute
 
-   atoms = atomarr / uint / bstr,    ; atoms array (mb empty) or their hash
+   atoms = atomarr / map /uint / bstr, ; atoms array (mb empty) or their hash
    bytedict = bstr / uint,           ; byte dictionary (mb empty) or it's hash
    CBAR = bstr .size (9..),
-   ? checksum = uint
+   checksum = uint
 
-In atom definitions, each definition MUST use only prior atom numbers if it's
-CBAR itself.
+  In atom definitions, each definition MUST use only prior atom numbers if
+  it's CBAR itself.
+
+TBD 20.12.24 ~03:10 using #6.10 on later elements on array with only
+previously defined means that `atomarr` always starts fresh dictionary - no
+inheritance here... for that, use map with keys:
+* '@' with ident of dictionary on which to operate at, i.e. inherit it
+  - false=0xf4 mnem Mjor Type 4 - prev in array / CBOR Sequence
+* '!' (as in `diff -c`)
+       splice ARRAY,OFFSET,LENGTH,LIST
+
+                   push(@a,$x,$y)      splice(@a,@a,0,$x,$y)
+                   pop(@a)             splice(@a,-1)
+                   shift(@a)           splice(@a,0,1)
+                   unshift(@a,$x,$y)   splice(@a,0,0,$x,$y)
+                   $a[$i] = $y         splice(@a,$i,1,$y)
+'!' => [[offset, len, index-in-$1], [offset, len, index-in-$2, [nested-splice-offs, len, index-in-$4], index-in-$3 ]]
+'$' => [arg0, arg1, arg2, arg3, arg4]
+
+...or for implementation better linear? with variables?
 
 original: 78 32 "http://192.168.1.103:8445/wot/thing/MyLED/ledOnOff"
 226("ledOnOff") == D8 E2 68 'ledOnOff'
@@ -848,6 +866,13 @@ why extended code to enter IN_BLOB ? enter on usual tstr/bstr and *scan*:
 
 for map merging, tag 63 Encoded CBOR Sequence may be used,
 cbor-records 57342-57599 also instead of tag 114
+
+  VarUInt30 means variable-length unsigned integer capable of holding at
+  most 30 bits, by the following bit patterns (from MSB to LSB):
+  * 0aaaaaaa                             - 7 bits, values 0..127 coded as-is
+  * 100aaaaa bbbbbbbb                    - 13 bits
+  * 101aaaaa bbbbbbbb cccccccc           - 21 bits
+  * 11aaaaaa bbbbbbbb cccccccc dddddddd  - 30 bits
 
   Opcodes of IN_BLOB state:
 
@@ -916,7 +941,10 @@ cbor-records 57342-57599 also instead of tag 114
   it's length analyzed, and, for all opcodes except strings, corresponding
   number of bytes is output without interpreting - that is, these opcodes are
   meaningful only at start of CBOR element, or compressed substitution of that
-  element, and not significant inside them (as in CBOR itself).
+  element, and not significant inside them (as in CBOR itself). Note that
+  "opcode" here means initial byte, so that only initial byte and header
+  (possibly up to 8 next bytes) are meant here, e.g. for map with two pairs
+  single A2 byte is output, not entire structural contents of the map.
 
   For standard CBOR text and byte strings opcodes, after output of element
   header, decoder initializes `remaining_bytes` variable to length of element
@@ -927,6 +955,8 @@ cbor-records 57342-57599 also instead of tag 114
   CBOR encoding - original uncompressed text - as:
 
     78 1E 666F6F62617262617A 31 666F6F62617262617A 32 666F6F62617271757578
+
+  (here spaces around "1" and "2" for better readability of text below)
 
   Suppose atom number 20 has value "foobarbaz" and atom number 3 value
   "foobarquux". Then in CBAR form it will be:
@@ -939,7 +969,7 @@ cbor-records 57342-57599 also instead of tag 114
   decimal 20 (in our example numbers are small enough for VarInt to fit in
   a byte). It outputs contents of atom 20, and decrements `remaining_bytes` by
   length of atom, 9. Then it sees plain 0x31 byte, outputs it, decrementing
-  `remaining_bytes` by 1. Process repeats with next atom and byte 0x31.
+  `remaining_bytes` by 1. Process repeats with next atom and byte 0x32.
   Finally, there is 0x3E, short single-byte opcode for atom 3, which is output
   and `remaining_bytes` variable reaches 0 as length of atom 3 matches it. So
   decoder exit IN_BLOB state and expects start of next CBOR element after this
@@ -950,7 +980,7 @@ cbor-records 57342-57599 also instead of tag 114
   CBAR, if such will appear in the future, and - more importantly - it allows
   to paste atoms or literals as CBOR fragments. For example, this allows for
   CBOR sequences or copying incomplete CBOR structures, like fragments of
-  unclosed (unfinished) array or maps. It is possible because on each step,
+  unclosed (unfinished) arrays or maps. It is possible because on each step,
   decoder do not check CBOR to be structurally valid (though it SHOULD do so
   for final document) - it just expects next CBOR element and nothing more.
 
@@ -960,53 +990,163 @@ cbor-records 57342-57599 also instead of tag 114
   processing, because length of atom is already known. Thus, e.g. 7C and atom
   number is converted on output to proper CBOR element header of atom length,
   folowed by atom contents. For example, if atom 13 is "outputData", then
-  7C 0D is expanded to 7A 6F 75 74 70 75 74 44 61 74 - 7A corresponds to
-  length of 10 bytes of atom contents.
+  7C 0D is expanded to 6A 6F 75 74 70 75 74 44 61 74 - 6A corresponds to
+  length of 10 bytes of atom contents in standard CBOR Major Type 3.
 
   Tag #6.10 may be applied not only to entire array (which is logically
   substituted to enclosing CBOR after uncompressing) but also to binary
-  string. This is used for atom setup table to use previously defined atoms.
-  If an atom is simple CBOR element or structured construct, the it's content
-  is not processed, just used as-is. If atom is bstr (Major Type 2) with tag
+  string. This is used for two purposes, however with the same implementation
+  code. First is standalone #6.10 in CBOR stream - in this case, it is assumed
+  that dictionary was setup earlier, either in the CBOR stream or by external
+  application means, e.g. media type. That is, it is equivalent as if the same
+  #6.10 with array with same dictionary was substituted in place of this bstr.
+  Second purpose is for atom setup table to use previously defined atoms, see
+  below.
+
+  Dictionary is set up as follows.
+
+  If an atom is simple CBOR element or structured construct (e.g. map), then
+  it's content is not processed, just used as-is: e.g. map encoding including
+  child key-value pairs), or 9 bytes for double-size floating point value
+  (0xfb and 8 bytes of IEEE 754). If an atom is of Major Type 2 or 3, then
+  only contents of this string is used, e.g. 63 666F6 for "foo" will result
+  in 3-byte atom 666F6. However if an atom is bstr (Major Type 2) with tag
   #6.10, then it's contents processed (and expanded value then used) by the
   same CBAR unpacking process - but decoder start state is IN_BLOB (instead of
   IN_CBOR for main CBAR) with `remaining_bytes` initialized to infinity and
   error on premature end of input is suppressed. Atoms allowed inside decoding
-  such atom are only those atoms defined earlier in this array.
+  such atom are only those atoms defined earlier in this dictionary array.
+  Decoder, however, may be told to start in IN_CBOR state if the bstr has
+  additionally tag 24 or 63 (encoded CBOR or CBOR Sequence).
 
-#6.10([
-  /atoms/[
-    "rgbValue",    #6.10(#2.11 C0 "Red"), #6.10(#2.13 C0 "Green"),
-  / 0 (9 bytes)    1 (CA 4B C0 52 65 64)   2 (8 bytes)  /
+TBD what rules are for substituting decoded or not decoded element
+(that is, to leave #6.10(bstr) as just unpacked blob) ? order of 
+tags prepended to bstr?
+
+  Note that title says "and generic BLOB" - that is, tag #6.10 an a string
+  without tag 24 or 63 is not decoded to CBOR or CBOR sequence after unpacking
+  but left as just expanded string - for applications which want compression
+  only on some their BLOBs, not structurally. It may be point of view that an
+  atom with both tags 10 and 63 is exception as decoded sequence is NOT
+  substituted as several elements of atoms array - but better view in
+  implementation that atoms after expanding are immediately entered into
+  internal table, in contrast to CBOR stream, where expanded contents is then
+  fed to generic CBOR decoding process.
+
+  Example from draft-cbor-packed, in higher compression variant:
+
+#6.10([                                                            / 2 bytes /
+  /atoms/[                                                         / 1 byte  /
+    "rgbValue",   #6.10(#2.11 C0 "Red"),  #6.10(#2.13 C0 "Green"),
+  / #0 (9 bytes)  #1 (CA 4B C0 52 65 64)  #2 (8 bytes)            = 23 bytes /
 
     #6.10(#2.12 C0 "Blue"), "http://192.168.1.10",
-  /  3 (7 bytes)            4 (20 bytes)            /
+  / #3 (7 bytes)            #4 (20 bytes)                         = 27 bytes /
 
-    #6.10(#2.35 5D "3:8445/wot/thing"), #6.10(#2.42 5E "/MyLED/"),
-  /  5 (CA 58 23 5D ..-> 20 bytes )       6 (CA 58 3A 5E ..-> 11 bytes) /
+    #6.10(#2.35 F7 "3:8445/wot/thing")), #6.10(#2.42 F8 "/MyLED/"),
+  / #5 (CA 58 23 F7 ..-> 20 bytes )      #6 (CA 58 3A F8 ..-> 11 bytes) = 31 /
 
-    "name", "@type", "links", "href", "mediaType", "application/json",
-  /  7 (5 b)  8 (5 b)  9 (6 b) 10 (5 b)  11 (10 b)   12 (17 b) /
+    "name", "@type",  "links",  "href",   "mediaType", "application/json",
+  / #7 (5 b) #8 (5 b)  #9 (6 b)  #10 (5 b)  #11 (10 b)  #12 (17 b)    = 48 b /
 
-    "outputData",   "valueType",   "type",      "writable",
-  / 13 (11 bytes)   14 (10 bytes)  15 (5 bytes)  16 (9 bytes) /
+    "outputData",   "valueType",    "type",        "writable",
+  / #13 (11 bytes)  #14 (10 bytes)  #15 (5 bytes)  #16 (9 bytes)   = 35 bytes/
 
     #6.10(#6.63(#2.18 "outputData": { "valueType": { "type": "number" } } )),
-  / 17 (CA D83F 52 6F FD0D A1 49 FD0E A1 44 FD0F 46 6E756D626572 -> 22 b) /
+  / #17 (CA D83F 52 6F FD0D A1 49 FD0E A1 44 FD0F 46 6E756D626572 -> 22 b) /
 
-    ["Property"],                  "colorTemperatureChanged",
-    / 18 (81 48 68 ..-> 10 bytes)  19 (24 bytes) /
-  ],
-  /bytedict/"",
-  /CBAR/#2.xxx<
-  
-  ...TODO
+    ["Property"],                 "colorTemperatureChanged",
+  / #18 (81 48 68 ..-> 10 bytes)  #19 (24 bytes)                  = 34 bytes /
+  ],                                              / -> 220 bytes of contents /
+  /bytedict/"",                                                   / = 1 byte /
+  /CBAR/#2.308<                                                  / = 3 bytes /
+  / { "name": "MyLED",       "interactions":              [      / 9+13+1    /
+    A6 7E 07   65 4D794C4544  6c 696E746572616374696F6E73 86     / = 23 bytes/
 
-  / "outputData": { "valueType": { "type": "boolean" } } /
+  / {  "links": [  {  "href": "http://192.../rgbValueRed"         = 11 bytes /
+    A5 7E 09    81 A2 7E 0A   78 35 F9       C1
+  / "mediaType": "application/json" } ]                           =  4 bytes /
+    7E 0B        7E 0C
+  / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
+    FD 0D
+  / "name": "rgbValueRed", "writable": true,                      =  7 bytes /
+    7E 05   7E 01          7E 10       F5
+  / "@type": ["Property"] },                                      =  4 bytes /
+    7E 08    FD 12
+
+  / {  "links": [  {  "href": "http://192.../rgbValueGreen"       = 11 bytes /
+    A5 7E 09    81 A2 7E 0A   78 37 F9       F5
+  / "mediaType": "application/json" } ]                           =  4 bytes /
+    7E 0B        7E 0C
+  / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
+    FD 0D
+  / "name": "rgbValueGreen", "writable": true,                    =  7 bytes /
+    7E 05   7E 02            7E 10       F5
+  / "@type": ["Property"] },                                      =  4 bytes /
+    7E 08    FD 12
+
+  / {  "links": [  {  "href": "http://192.../rgbValueBlue"        = 11 bytes /
+    A5 7E 09    81 A2 7E 0A   78 37 F9       F6
+  / "mediaType": "application/json" } ]                           =  4 bytes /
+    7E 0B        7E 0C
+  / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
+    FD 0D
+  / "name": "rgbValueBlue", "writable": true,                     =  7 bytes /
+    7E 05   7E 03           7E 10       F5
+  / "@type": ["Property"] },                                      =  4 bytes /
+    7E 08    FD 12
+
+  / {  "links": [  {  "href": "http://192.../rgbValueWhite"       = 16 bytes /
+    A5 7E 09    81 A2 7E 0A   78 37 F9       C0 5768697465
+  / "mediaType": "application/json" } ]                           =  4 bytes /
+    7E 0B        7E 0C
+  / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
+    FD 0D
+  / "name": "rgbValueWhite",        "writable": true,             = 14 bytes /
+    7E 05   6D C0 FC 05 5768697465  7E 10       F5
+  / "@type": ["Property"] },                                      =  4 bytes /
+    7E 08    FD 12
+
+  / {  "links": [  {  "href": "http://192.../ledOnOff"            = 20 bytes /
+    A5 7E 09    81 A2 7E 0A   78 32 F9    FC 08 6C65644F6e4F6666
+  / "mediaType": "application/json" } ]                           =  4 bytes /
+    7E 0B        7E 0C
+  / "outputData": { "valueType": { "type": "boolean" } }          = 16 bytes /
     7C 0D        A1  7C 0E      A1 7C 0F  67 626F6F6C65616E
+  / "name": "ledOnOff",         "writable": true,                 = 14 bytes /
+    7E 05   68 6C65644F6e4F6666  7E 10       F5
+  / "@type": ["Property"] },                                      =  4 bytes /
+    7E 08    FD 12
 
-  ...TODO
-  >
+  / {  "links": [  {  "href": "http:/.../colorTemperatureChanged" = 12 bytes /
+    A5 7E 09    81 A2 7E 0A   78 41 F9   FD 13
+  / "mediaType": "application/json" } ]                           =  4 bytes /
+    7E 0B        7E 0C
+  / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
+    FD 0D
+  / "name": "colorTemperatureChanged", "writable": true,          =  7 bytes /
+    7E 05   7E 13                      7E 10       F5
+  / "@type": [ "Event"         ] },                               =  9 bytes /
+    7E 08    81 65 4576656E74
+
+  / "@type": "Lamp",      "id":   "0",                            = 12 bytes /
+    7E 08    64 4C616D70  62 6964 61 30
+  /  "base":      "http://192.168.1.103:8445/wot/thing",          =  7 bytes /
+    64 62617365   7E F8
+  / "@context":                                                   =  9 bytes /
+    68 40636F6E74657874
+  / "http://192.168.1.102:8444/wot/w3c-wot-td-context.jsonld"     = 41 bytes /
+    78 37 F7            FC 24 323A383434342F...6F6E6C64
+  >                                               / -> 308 bytes of contents /
 ])
+
+  for a 2+1+220+1+3+308 = 535 bytes total, which could be reduced to 529 by
+  eliminating three FC xx codes (left for demonstration).
+
+TBD 20.12.24 another variant tag 0xFC Fast Compressable: strings have VarInt64
+instead of contents, which is moved to separate strings section, where used as
+offset into it, with offset threshold to be possible to `mmap()` common
+dictionary on many documents; or VarInt64 may be other identificator, e.g.
+`rowid` of text/BLOB in database where this document resides
 
 TODO

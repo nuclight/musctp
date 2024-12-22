@@ -6604,6 +6604,8 @@ IWL:
 
 TBD if ShKeyID+ErsatzMAC to Septinovile, then has space for OnPath
 
+TBD 19.12.24 BLAKE2 allows 1-byte digest, redo VerSize coding as static Huffman so it ErsatzMAC could be more real? Of course more as a checksum, but that allows for fragments to have one AUTH chunk per several packets and to use that several packets not blindly
+
       0                   1                   2                   3
       0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+

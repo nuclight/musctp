@@ -1249,6 +1249,7 @@ TBD define like in SCTP or CoAP or IPv6 [RFC 8200] rethink 10 & 11 about multica
      Option length - value length in bytes
 
      Pad - pad after option value, in bytes
+TBD 20.12.24 05:30 it may be "align to this power of two"
 
      (subfields are in order allowing more easily manually decode them
      visually observing in hexdump)
