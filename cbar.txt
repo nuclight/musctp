@@ -831,13 +831,13 @@ earlier atoms
         / #6.10(bstr)         ; itself CBAR - definition uses previous atoms
 	/ any                 ; valid CBOR fragment to substitute
 
-   atoms = atomarr / map /uint / bstr, ; atoms array (mb empty) or their hash
+   atoms = atomarr / map / uint / bstr, ; atoms array (mb empty) or their hash
    bytedict = bstr / uint,           ; byte dictionary (mb empty) or it's hash
-   CBAR = bstr .size (9..),
+   CBAR = null / bstr .size (3..),   ; may have e.g. 40003 tag if DEFLATE'd
    checksum = uint
 
   In atom definitions, each definition MUST use only prior atom numbers if
-  it's CBAR itself.
+  it's CBAR itself (that is, defined with #6.10 tag).
 
 TBD 20.12.24 ~03:10 using #6.10 on later elements on array with only
 previously defined means that `atomarr` always starts fresh dictionary - no
@@ -857,6 +857,21 @@ inheritance here... for that, use map with keys:
 
 ...or for implementation better linear? with variables?
 
+TBD 30.12.24 16:45 another map key for scoping? e.g. push/pop like JSON-LD @context...
+- or, it's a value of '@' key, and another key is better to refer to external
+  dictionary instead of `splice()`... ':' for inheritance?
+- or still '{' => true as separate setting from dictionaries?
+- have a dict reference in '$' key when not array?
+- or just '@' as array with dict references, including main dict
+- ~22:00 tagged array of ops instead of map to even more ease to decoder?
+  - just list as (* opcode => ?argument), e.g.
+    ['@'=>1, '@'=>2, '{', '!'=> [], ..., CBAR, ? checksum]
+    with atomarr being just common case of dict from scratch
+    - here '{' have no args - generalize to chars > 64 ?
+
+
+TBD 30.12 16:23 #6.10 for uint/nint - just one atome to unpack without bstr parse?
+
 original: 78 32 "http://192.168.1.103:8445/wot/thing/MyLED/ledOnOff"
 226("ledOnOff") == D8 E2 68 'ledOnOff'
                    7E 32 FD nn FC 08 'ledOnOff'
@@ -874,7 +889,40 @@ cbor-records 57342-57599 also instead of tag 114
   * 101aaaaa bbbbbbbb cccccccc           - 21 bits
   * 11aaaaaa bbbbbbbb cccccccc dddddddd  - 30 bits
 
-  Opcodes of IN_BLOB state:
+  Rationale: As this compression is targeted primarily towards constrained
+             implementations, those supporting more than 32 bits are
+             considered unconstrained - that is, e.g. more than 4 Gbytes
+             chunks of data. And 2^30 atoms will require 5 Gbytes of memory at
+             minimum; for literal lengths 2^30 bytes is also unlikely to
+             surpass when other memory from 4 Gbytes is needed for other
+             purposes.
+
+             However, if discussion will conclude that 60+ bits needed (e.g.
+             for unification with YANG SID), alternative VarUInt60 supporting
+	     60 bits in 8 bytes is posible:
+
+             0..143 values coded as themselves                    bits:
+             1001aaaa bbbbbbbb                                     - 12
+             1010aaaa bbbbbbbb cccccccc                            - 20
+             1011aaaa bbbbbbbb cccccccc dddddddd                   - 28
+             1100aaaa bbbbbbbb cccccccc dddddddd eeeeeeee          - 36
+             1101aaaa bbbbbbbb cccccccc dddddddd eeeeeee  ffffffff - 44
+             1110aaaa bbbbbbbb cccccccc dddddddd   ...    gggggggg - 52
+             1111aaaa bbbbbbbb cccccccc dddddddd   ...    hhhhhhhh - 60
+
+             Or even full 64 bits in 9 bytes is possible:
+
+             0..191 values coded as themselves                     bits:
+             110aaaaa bbbbbbbb                                     - 13
+             1110aaaa bbbbbbbb cccccccc                            - 20
+             11110aaa bbbbbbbb cccccccc dddddddd                   - 27
+             111110aa bbbbbbbb cccccccc dddddddd eeeeeeee          - 34
+             11111100 aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee - 40
+             11111101 aaaaaaaa bbbbbbbb cccccccc   ...    ffffffff - 48
+             11111110 aaaaaaaa bbbbbbbb cccccccc   ...    gggggggg - 56
+             11111111 aaaaaaaa bbbbbbbb cccccccc   ...    hhhhhhhh - 64
+
+  Opcodes of IN_BLOB state, with possible <argument N>:
 
   C0             - Atom 0
   C1             - Atom 1
@@ -906,7 +954,7 @@ cbor-records 57342-57599 also instead of tag 114
 	     few bytes - instead, for performance of decoder, FC code with
 	     length should be used, allowing to skip to next code.
 
-  Opcodes of IN_CBOR state:
+  Opcodes of IN_CBOR state, with <arguments> (and mnemonics):
 
   1C <3 bytes>   - (terCio) Output 1A 00 <3 bytes>
   1D             - Atom 0
@@ -1033,7 +1081,8 @@ tags prepended to bstr?
   internal table, in contrast to CBOR stream, where expanded contents is then
   fed to generic CBOR decoding process.
 
-  Example from draft-cbor-packed, in higher compression variant:
+  Example from draft-cbor-packed, in higher compression variant (this is not
+  quite CBOR diagnostic notation but hex codes for bytes should be familiar):
 
 #6.10([                                                            / 2 bytes /
   /atoms/[                                                         / 1 byte  /
@@ -1061,78 +1110,78 @@ tags prepended to bstr?
   /bytedict/"",                                                   / = 1 byte /
   /CBAR/#2.308<                                                  / = 3 bytes /
   / { "name": "MyLED",       "interactions":              [      / 9+13+1    /
-    A6 7E 07   65 4D794C4544  6c 696E746572616374696F6E73 86     / = 23 bytes/
+    A6 7C 07   65 4D794C4544  6c 696E746572616374696F6E73 86     / = 23 bytes/
 
   / {  "links": [  {  "href": "http://192.../rgbValueRed"         = 11 bytes /
-    A5 7E 09    81 A2 7E 0A   78 35 F9       C1
+    A5 7C 09    81 A2 7C 0A   78 35 F9       C1
   / "mediaType": "application/json" } ]                           =  4 bytes /
-    7E 0B        7E 0C
+    7C 0B        7C 0C
   / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
     FD 0D
   / "name": "rgbValueRed", "writable": true,                      =  7 bytes /
-    7E 05   7E 01          7E 10       F5
+    7C 05   7C 01          7C 10       F5
   / "@type": ["Property"] },                                      =  4 bytes /
-    7E 08    FD 12
+    7C 08    FD 12
 
   / {  "links": [  {  "href": "http://192.../rgbValueGreen"       = 11 bytes /
-    A5 7E 09    81 A2 7E 0A   78 37 F9       F5
+    A5 7C 09    81 A2 7C 0A   78 37 F9       F5
   / "mediaType": "application/json" } ]                           =  4 bytes /
-    7E 0B        7E 0C
+    7C 0B        7C 0C
   / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
     FD 0D
   / "name": "rgbValueGreen", "writable": true,                    =  7 bytes /
-    7E 05   7E 02            7E 10       F5
+    7C 05   7C 02            7C 10       F5
   / "@type": ["Property"] },                                      =  4 bytes /
-    7E 08    FD 12
+    7C 08    FD 12
 
   / {  "links": [  {  "href": "http://192.../rgbValueBlue"        = 11 bytes /
-    A5 7E 09    81 A2 7E 0A   78 37 F9       F6
+    A5 7C 09    81 A2 7C 0A   78 37 F9       F6
   / "mediaType": "application/json" } ]                           =  4 bytes /
-    7E 0B        7E 0C
+    7C 0B        7C 0C
   / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
     FD 0D
   / "name": "rgbValueBlue", "writable": true,                     =  7 bytes /
-    7E 05   7E 03           7E 10       F5
+    7C 05   7C 03           7C 10       F5
   / "@type": ["Property"] },                                      =  4 bytes /
-    7E 08    FD 12
+    7C 08    FD 12
 
   / {  "links": [  {  "href": "http://192.../rgbValueWhite"       = 16 bytes /
-    A5 7E 09    81 A2 7E 0A   78 37 F9       C0 5768697465
+    A5 7C 09    81 A2 7C 0A   78 37 F9       C0 5768697465
   / "mediaType": "application/json" } ]                           =  4 bytes /
-    7E 0B        7E 0C
+    7C 0B        7C 0C
   / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
     FD 0D
   / "name": "rgbValueWhite",        "writable": true,             = 14 bytes /
-    7E 05   6D C0 FC 05 5768697465  7E 10       F5
+    7C 05   6D C0 FC 05 5768697465  7C 10       F5
   / "@type": ["Property"] },                                      =  4 bytes /
-    7E 08    FD 12
+    7C 08    FD 12
 
   / {  "links": [  {  "href": "http://192.../ledOnOff"            = 20 bytes /
-    A5 7E 09    81 A2 7E 0A   78 32 F9    FC 08 6C65644F6e4F6666
+    A5 7C 09    81 A2 7C 0A   78 32 F9    FC 08 6C65644F6e4F6666
   / "mediaType": "application/json" } ]                           =  4 bytes /
-    7E 0B        7E 0C
+    7C 0B        7C 0C
   / "outputData": { "valueType": { "type": "boolean" } }          = 16 bytes /
     7C 0D        A1  7C 0E      A1 7C 0F  67 626F6F6C65616E
   / "name": "ledOnOff",         "writable": true,                 = 14 bytes /
-    7E 05   68 6C65644F6e4F6666  7E 10       F5
+    7C 05   68 6C65644F6e4F6666  7C 10       F5
   / "@type": ["Property"] },                                      =  4 bytes /
-    7E 08    FD 12
+    7C 08    FD 12
 
   / {  "links": [  {  "href": "http:/.../colorTemperatureChanged" = 12 bytes /
-    A5 7E 09    81 A2 7E 0A   78 41 F9   FD 13
+    A5 7C 09    81 A2 7C 0A   78 41 F9   FD 13
   / "mediaType": "application/json" } ]                           =  4 bytes /
-    7E 0B        7E 0C
+    7C 0B        7C 0C
   / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
     FD 0D
   / "name": "colorTemperatureChanged", "writable": true,          =  7 bytes /
-    7E 05   7E 13                      7E 10       F5
+    7C 05   7C 13                      7C 10       F5
   / "@type": [ "Event"         ] },                               =  9 bytes /
-    7E 08    81 65 4576656E74
+    7C 08    81 65 4576656E74
 
   / "@type": "Lamp",      "id":   "0",                            = 12 bytes /
-    7E 08    64 4C616D70  62 6964 61 30
+    7C 08    64 4C616D70  62 6964 61 30
   /  "base":      "http://192.168.1.103:8445/wot/thing",          =  7 bytes /
-    64 62617365   7E F8
+    64 62617365   7C F8
   / "@context":                                                   =  9 bytes /
     68 40636F6E74657874
   / "http://192.168.1.102:8444/wot/w3c-wot-td-context.jsonld"     = 41 bytes /
@@ -1142,6 +1191,9 @@ tags prepended to bstr?
 
   for a 2+1+220+1+3+308 = 535 bytes total, which could be reduced to 529 by
   eliminating three FC xx codes (left for demonstration).
+
+TODO non-high-compression but "encoder-implementation-friendly" variant for at
+most 1 atom per string (repeated strings only), with additional LZ pass
 
 TBD 20.12.24 another variant tag 0xFC Fast Compressable: strings have VarInt64
 instead of contents, which is moved to separate strings section, where used as
