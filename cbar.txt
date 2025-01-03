@@ -808,20 +808,24 @@ TBD what if use simple(0)..simple(15) for first atoms? so mb change varint to 24
 
 === 15.12.24:
 
+      CBAR: CBOR and generic BLOBs by-Atom Reducing
+      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 packing of CBOR sequences - cbor-packed not, CBAR allows
 
 pre-setup - possible e.g. as CBOR sequence
 TBD use 22098 for recursive "after unpacking, there are more CBAR inside"?
 TBD alternatives (tag 121) for multiple dictionaries?
 
+alternative to YANG SID (avoid uniqueness management) and YANG bits (#6.43)
+and CBOR-LD (may be even JSON-LD)
+
   The format is described in terms of unpacker copying data from input to
   target unpacked CBOR which later can be feed to generic CBOR decoder,
   however, it is possible, though hard, to implement in-place access to
   CBAR data (like in draft-cbor-packed), if application wish so and is
   constrained in RAM but not ROM.
-
-in atom table - allow #6.10 for CBAR as atom definition, that is, to reference
-earlier atoms
+strings are typically already in implementation memory, opposed to bytedict
 
    CBAR-CBOR = #6.10([atoms, bytedict, CBAR, ? checksum])  ; 0x0a for "Atom"
              / #6.10(CBAR)    ; binary string - everything other setup earlier
@@ -839,48 +843,156 @@ earlier atoms
   In atom definitions, each definition MUST use only prior atom numbers if
   it's CBAR itself (that is, defined with #6.10 tag).
 
-TBD 20.12.24 ~03:10 using #6.10 on later elements on array with only
-previously defined means that `atomarr` always starts fresh dictionary - no
-inheritance here... for that, use map with keys:
-* '@' with ident of dictionary on which to operate at, i.e. inherit it
-  - false=0xf4 mnem Mjor Type 4 - prev in array / CBOR Sequence
-* '!' (as in `diff -c`)
-       splice ARRAY,OFFSET,LENGTH,LIST
+  ## Model of operation.
 
-                   push(@a,$x,$y)      splice(@a,@a,0,$x,$y)
-                   pop(@a)             splice(@a,-1)
-                   shift(@a)           splice(@a,0,1)
-                   unshift(@a,$x,$y)   splice(@a,0,0,$x,$y)
-                   $a[$i] = $y         splice(@a,$i,1,$y)
-'!' => [[offset, len, index-in-$1], [offset, len, index-in-$2, [nested-splice-offs, len, index-in-$4], index-in-$3 ]]
-'$' => [arg0, arg1, arg2, arg3, arg4]
+  Encoder and decoder are described here in object-oriented terms, though
+  implementation is not obliged to be OO-style. At some point, new object is
+  instantiated (constructor called), on which methods could be called, either
+  for settings (e.g. canonical mode) or for actual CBOR processing. From this
+  specification's point of view, a decoder object holds state needed for
+  unpacking, that is, primarily dictionaries of atoms. This state could be
+  modified by application calling methods on object, outside of any CBOR
+  processing, and thus CBAR information is defined in such way that is
+  equivalent to "in-band" calling of such state-modifying methods.
 
-...or for implementation better linear? with variables?
+  A generalized view of application protocol is ordered sequence of messages
+  decoded (or a sub-sequence if partial ordered):
 
-TBD 30.12.24 16:45 another map key for scoping? e.g. push/pop like JSON-LD @context...
-- or, it's a value of '@' key, and another key is better to refer to external
-  dictionary instead of `splice()`... ':' for inheritance?
-- or still '{' => true as separate setting from dictionaries?
-- have a dict reference in '$' key when not array?
-- or just '@' as array with dict references, including main dict
-- ~22:00 tagged array of ops instead of map to even more ease to decoder?
-  - just list as (* opcode => ?argument), e.g.
-    ['@'=>1, '@'=>2, '{', '!'=> [], ..., CBAR, ? checksum]
-    with atomarr being just common case of dict from scratch
-    - here '{' have no args - generalize to chars > 64 ?
+   new()       Message 1                   Message 2
+     |      .-------------.     .----------------------------.
+     |      | CBOR Item 1 |     |        CBOR Sequence       |
+     |      |             |     |-------------+--------------|
+     |      |             |     | CBOR Item 1 | CBOR Item 2  |
+     |----->|             |---->|             |              |----> ...
+     |      |             |     |             | {      lvl 1 |
+     |      |             |     |             |   [    lvl 2 |
+     |      |             |     |             |     {  lvl 3 |
+     |      |             |     |             |     },       |
+     |      |             |     |             |     s, lvl 2 |
+            `-------------'     `-------------+--------------'
 
+  However, observe that generic decoder does not need to know application
+  messages' boundaries - to support CBOR Sequences, it is enough for decoder
+  to have methods e.g. `decode()` and `decode_prefix()` both accepting buffer
+  with bytes (e.g. pointer and length), where former method expects entire
+  buffer consists of complete CBOR item and latter decodes complete CBOR item
+  returning number of bytes consumed from buffer (note such interface is
+  unified for both CBOR Sequences and incremental parsing of partially
+  received stream).
 
-TBD 30.12 16:23 #6.10 for uint/nint - just one atome to unpack without bstr parse?
+  Thus, for decoder the diagram above is in fact equivalent to single message
+  with three CBOR sequences or 3 messages - it's merely for application where
+  it may call additional methods after the initial `new()` constructor and
+  settings methods.
 
-original: 78 32 "http://192.168.1.103:8445/wot/thing/MyLED/ledOnOff"
-226("ledOnOff") == D8 E2 68 'ledOnOff'
-                   7E 32 FD nn FC 08 'ledOnOff'
+  CBAR is intended to be used in scenarios where packing information is known
+  beforehand, so it is possible to achieve better compression by not including
+  dictionary in each CBOR message, but provide it out of band. Of course, full
+  support of inline (in CBOR stream itself) dictionaries definition is
+  supported, as well as multiple dictionaries and redefining them inside of
+  complex CBOR structures - similar in spirit to JSON-LD's "@context"'s. On
+  the diagram above there is map containg array containing other map and
+  string, elements of outer map wuld have level 1 of nesting, elements of
+  array are on level 2 (including string s), and elements in map in array
+  would be on level 3. Thus, each top-level CBOR item could be viewed as being
+  on level 0.
+ 
+  ## Tag equivalence
 
-why extended code to enter IN_BLOB ? enter on usual tstr/bstr and *scan*:
-78 32 FD nn 'ledOnOff'
+  This section borrows same chapter from [draft-cbor-packed] and extends it
+  for CBAR in adding exceptions to generic rule for nested tags where it was
+  equivalent to leave outer tag and replace inner tag with it's
+  modified/substituted contents: for Tag #6.10, a tag following it (that is,
+  inner to it) may be "modifier" to it. For example,
 
-for map merging, tag 63 Encoded CBOR Sequence may be used,
-cbor-records 57342-57599 also instead of tag 114
+    #6.10(#6.63("binary string"))
+
+  means that binary string after unpacking (with dictionary set up somewhere
+  before) must be "substituted", omitting both tags, as CBOR elements in this
+  place. If that binary string is to be left as is for application in unpacked
+  CBOR, then just `#6.10("binary string")` is used. If application wants
+  a binary string, just tagged as CBOR Sequence, then tag is moved out:
+
+    #6.63(#6.10("binary string")
+
+  This way, tag #6.10 could be used just for binary strings unpacking, not
+  altering CBOR tree structure at all - hence "B" in "CBAR" is for generic
+  BLOBs. And both methods could be combined in same CBOR stream.
+
+  ## Rules of Tag #6.10 substituitions
+
+  Example of substituting bare tag #6.10 for binary strings already was given
+  (only to remind here is that inner tag 24 also could be used for complete
+  CBOR item, not sequence). Tag #6.10 on an array where CBAR member is
+  non-null is always expanded as complete CBOR item (unless CBAR member has
+  tag #6.63 on it, then as sequence) - because it is useless to setup
+  dictionary for just one binary string, so it's not supported.
+
+TBD is it?
+
+  The other possible application of Tag #6.10 is on integers, where integer is
+  atom number, expanding to a single string, with positive integers expanding
+  to binary strings (Major Type 2) and negative to text strings (Major Type
+  3) TBD mnemonic is to add 2 to major type, but is it friendly?
+
+  This is in fact just another way to write #6.10(#6.24(h'7C /atom num/') or
+  with "5C" for binary string, saving a byte for atom numbers less than 65536
+  and having additional benefits:
+
+  * simplified encoders/decoders may operate on single atoms rather than deep
+    scanning of strings concatenated from pieces
+  * a tag with a number is more readable in Diagnostic Notation than binary
+    string with a prefix and varint
+
+  And last use of Tag #6.10 is on undefined as map key (that is, two bytes
+  0xDA 0xF7), where map's value for such key is array for dictionary setup
+  (that is, in which CBAR member is null). It is described later in section
+  on nesting decitionaries.
+
+  All other uses of Tag #6.10 are reserved for future use and MUST NOT be
+  emitted by conforming encoders for now version.
+
+  ## Dictionary setup - tag #6.10 on array
+
+  Tag #6.10 always sets up dictionary for use later in stream. It may have
+  CBAR member (last or before checksum), which is then expanded using this
+  dictionary and substituted in place of entire tagged array - or CBAR member
+  may be null, meaning this is just dictionary setup for later use (e.g. on
+  individual bytestrings or integers, see examples above). In any case, tagged
+  array is "cutted" from unpacked CBOR, as if were not existing - thus
+  preferred place for dictionary is at top-level CBOR Sequence (level 0 on the
+  messages diagram above).
+
+  Dictionary setup can be in two forms: simple and full. Simple is:
+
+    #6.10([atoms, bytedict, CBAR, ? checksum])
+
+  Where `atoms` is array explicitly assigning atom in dictionary by index in
+  array - first, i.e. index 0 is array, is atom 0, then atom 1 and so on.
+
+  Full form instead of `atoms` array and `bytedict`  consists of commands and
+  their arguments, occuping everything till CBAR (and possibly checksum)
+  members. Commands (opcodes) are single-character strings which have single
+  outer array member after them - also an array if more than one argument
+  needed. That is, it is like a key-value list (like map), but in array form,
+  may have odd number and is processed sequentially.
+
+  Rationale: naturally, it could have been a map, but map could have entries
+             in any order, so it would require from decoder to 1) buffer
+	     everything till end of map is seen and start processing only
+	     then, and 2) some way to reference between map entries, when
+	     there is more than one operation of same type (that is, requiring
+	     array under a single map key). Thus, in array form it is possible
+	     for decoder to process entries immediately as they are seen,
+	     simplifying implementation and lowering memory requirements,
+	     while also allowing variable number of parameters per operation.
+
+  Full form at last produces an (in-memory) array of strings, which is then
+  processed same as array in simple form. Thus, first simple form and overall
+  CBAR decoder operation will be described, and then full form in later
+  section.
+
+  # Details of CBAR operation and simple-form dictionary
 
   VarUInt30 means variable-length unsigned integer capable of holding at
   most 30 bits, by the following bit patterns (from MSB to LSB):
@@ -1067,10 +1179,6 @@ cbor-records 57342-57599 also instead of tag 114
   Decoder, however, may be told to start in IN_CBOR state if the bstr has
   additionally tag 24 or 63 (encoded CBOR or CBOR Sequence).
 
-TBD what rules are for substituting decoded or not decoded element
-(that is, to leave #6.10(bstr) as just unpacked blob) ? order of 
-tags prepended to bstr?
-
   Note that title says "and generic BLOB" - that is, tag #6.10 an a string
   without tag 24 or 63 is not decoded to CBOR or CBOR sequence after unpacking
   but left as just expanded string - for applications which want compression
@@ -1194,11 +1302,234 @@ tags prepended to bstr?
 
 TODO non-high-compression but "encoder-implementation-friendly" variant for at
 most 1 atom per string (repeated strings only), with additional LZ pass
+- and with full form dict
 
 TBD 20.12.24 another variant tag 0xFC Fast Compressable: strings have VarInt64
 instead of contents, which is moved to separate strings section, where used as
 offset into it, with offset threshold to be possible to `mmap()` common
 dictionary on many documents; or VarInt64 may be other identificator, e.g.
 `rowid` of text/BLOB in database where this document resides
+
+for map merging, tag 63 Encoded CBOR Sequence may be used,
+cbor-records 57342-57599 also instead of tag 114
+
+
+TODO atoms length < 3 prohibited -> integers < 256 to splice are array numbers
+  - just list as (* opcode => ?argument), e.g.
+    ['@'=>1, '@'=>2, '{', '!'=> [], ..., CBAR, ? checksum]
+    with atomarr being just common case of dict from scratch
+    - here '{' have no args - generalize to chars > 64 ?
+
+  ## Full form of dictionary setup
+
+  Here array is processed sequentially - an operation folllowed by it's
+  arguments and possibly return value, then followed by another operation,
+  etc. As CBAR is for compression, operations - essentially method calls or
+  functions - are single-character strings. However, in this specification
+  they are usually referred by meaningful names, not just mnemonics.
+
+  Operation for dictionary setup in decoder is as follows. At start of array,
+  temporary variable space is created, which could be viewed as array of
+  arrays: there are variables numbered from 0 to maximum possible 255
+  (implementation may impose lower constraints), each being array of CBOR
+  values. At end of dictionary array, all variables (arrays) except 0 are
+  discarded, and variable 0 becomes dictionary array. This dictionary array
+  is then processed from start to end exactly as in the simple form, expanding
+  tagged with #6.10 values to final byte string, as usual.
+
+  The variables in paragraph above are explicit, visible to entity providing
+  instructions in dictionary setup array. Decoder, of course, will have other
+  internal variables, such as lengths of arrays or integer indexes at arrays.
+
+  Rationale: it could be possible to define processing without explicit
+             variables, in a functional style - using somewhat like an AST of
+	     function calls. However, this would require recursion support in
+	     decoder and can be difficult to express by automated encoders,
+	     not when dictionary transformation is constructed manually.
+	     While one can argue that dictionary scoping is also somewhat
+	     recursive, it requires just one more internal array variable from
+	     decoder (and index on it), implementable with same data
+	     structures as all other (CBOR) arrays.
+
+  To save a byte in outer array (that is tagged with #6.10) in common case,
+  more than one argument is wrapped in array itself, and possible return
+  value(s) are after arguments, e.g.
+
+    func-name (arguments) -> (where-to-assign)
+
+  becomes
+
+    'x', [+ arguments], where-to-assign
+
+  e.g. for function `splice()` assigning return value to variable 5 (array 5):
+
+    ..., '!', [1, 2, 3, 4], 5, ...
+
+  If return value is to be discarded (as `(void)func(...)` in C), then CBOR
+  `null` is used instead. Some functions do not have return value, in such
+  case they occupy just two elements in outer array, if have arguments, or may
+  be just function name, if no arguments are possible at all.
+
+  Debatable: is it needed to encode number of arguments/return to function
+             name somehow (e.g. let characters with ASCII code > 64 having no
+	     arguments) or we don't need it? It's arguable that if decoder
+	     cannot understand unknown function (from future revision), then
+	     it cannot just skip it without harming correctness.
+
+  Below are descriptions of allowed functions. At the start of processing
+  outer temporary array is empty, e.g. even variable 0 is not assigned yet.
+
+  "LIST" below means any number of array entries, including empty. Arguments
+  in list that are integers less than 256 are references to variables - e.g.
+  a whole array contents may be substituted.
+
+  Descriptions are given as if copies are made, implementations are free to
+  use optimization techniques like copy-on-write, however.
+
+  ### Function '@' - import() dictionary
+
+  Mnemonic: operate AT copy of referenced dictionary.
+
+  Return value: no.
+
+  Functional description:
+
+       import DICT-REF
+               Places a copy of dictionary referenced by sole argument to the
+	       highest unused variable, e.g. at the very start it will be put
+	       in variable (array) 0, if after that immediately follows another
+	       import(), result will be put in variable 1, and so on. Note that
+	       index of result is determined by solely size of outer array
+	       (i.e. a this is a push() operation).
+
+  Example:
+
+      ['@', 12345678, '@', #6.32("http://192.168.1.1:8443/main.dict"), ...]
+
+    copy contents of dictionary identified by application-specific number
+    12345678 to variable 0 and dictionary identified by URL into variable 1.
+
+  ### Function '!' - splice() an array
+
+  Mnemonic: change contents of variables like in `diff -c` utility output.
+
+  Return value: yes.
+
+  Functional description:
+
+       splice ARRAY,OFFSET,LENGTH,LIST
+       splice ARRAY,OFFSET,LENGTH
+       splice ARRAY,OFFSET
+       splice ARRAY
+               Removes the elements designated by OFFSET and LENGTH from an
+               array, and replaces them with the elements of LIST, if any.  If
+               return value is not null, put into that variable number the
+	       elements removed from the array. The array grows or shrinks as
+               necessary.  If OFFSET is negative then it starts that far from
+               the end of the array.  If LENGTH is omitted, removes everything
+               from OFFSET onward.  If LENGTH is negative, removes the
+               elements from OFFSET onward except for -LENGTH elements at the
+               end of the array.  If both OFFSET and LENGTH are omitted,
+               removes everything.  If OFFSET is past the end of the array and
+               a LENGTH was provided, decoder SHOULD issue a warning, and
+	       splices at the end of the array.
+
+               The following equivalences hold (assuming "length(a) > i" )
+
+                   push(a,x,y)         splice(a,length(a),0,x,y)
+                   pop(a)              splice(a,-1)
+                   shift(a)            splice(a,0,1)
+                   unshift(a,x,y)      splice(a,0,0,x,y)
+                   a[i] = y            splice(a,i,1,y)
+
+               "splice" can be used, for example, to implement n-ary queue
+               processing:
+
+                   sub nary_print {
+                     my $n = shift;
+                     while (my @next_n = splice @_, 0, $n) {
+                       say join q{ -- }, @next_n;
+                     }
+                   }
+
+                   nary_print(3, qw(a b c d e f g h));
+                   # prints:
+                   #   a -- b -- c
+                   #   d -- e -- f
+                   #   g -- h
+
+  Example:
+
+TODO
+
+  ### Function ':' - store() dictionary for later use
+
+  Mnemonic: name and value separator in JSON.
+
+  Return value: no.
+
+  Functional description:
+
+       store DICT-REF
+               Store resulting (after finishing processing) dictionary under
+	       this dictionary reference, so that it could be used by decoder
+	       later when such reference will appear in import() function.
+
+	       Note that multiple occurences, with different references, are
+	       allowed - same dictionary may be known by different names.
+
+	       DICT-REF here MUST NOT refer to CBAR scope stack, only user
+	       values are allowed.
+
+  Example:
+
+      ['!', [0,0,0,"A","B","C","D","E","F","G","H"], null, ':', 12345678, ...]
+
+    variable 0 is populated from scratch by splice() function, no more actions
+    (similar to simple form) and A B C D E F G H array will be known under
+    12345678 reference for possible later use.
+
+  ### Function '{' - enter() new dictionary scope ("stack frame")
+
+  Mnemonic: open brace of function in Bourne Shell and C-like languages.
+
+  Return value: no.
+
+  Functional description:
+
+       enter
+               Remember the dictionary that was "upper in stack" and restore
+	       it when current CBOR structural element finishes, e.g. when
+	       matching "}" or "]" would be seen in diagnostic notation. Does
+	       not affect the dictionary currently being built (temporary
+	       variables) in any way except marking it to be thrown away at
+	       the end of current block (except if store() function will store
+	       another copy).
+
+TBD what about scoping to end of current CBOR Sequence / top-level?
+
+TBD possible problem is that, by default, without scoping dictionary is just
+redefined "later in stream" - is it indended? arguably yes, because
+alternative with scoping exists
+- but what if one dictionary defined scoping and later did not?
+
+TBD a way in DICT-REF to refer some variable? e.g. an API call sets
+a var in decoder to some Message-Id before each message, then it may be used
+for store() and import() like a template mechanism?
+
+TBD recursion problem (nested CBAR after unpacking bytestr) - a tree of dicts?
+- or better prohibit recursion at all in favor of scoping? as it requires
+  additional memory and tree of dicts is too complex
+
+TODO examples to DICT-REF:
+   For example, in [IANA.cose] SHA-256 has the COSE algorithm identifier
+   -16.  This is in the range -256 .. 255 (inclusive range).  Therefore,
+   tag 18540 (= 18556 + (-16)) is the tag for a byte string containing a
+   SHA-256 hash.
+
+  ### Function 'Z' - zdict() for two-phases compression
+
+  Mnemonic: zip/zli/zstd/etc. dictionary
+  inflateSetDictionary()
 
 TODO
