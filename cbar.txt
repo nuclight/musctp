@@ -808,8 +808,33 @@ TBD what if use simple(0)..simple(15) for first atoms? so mb change varint to 24
 
 === 15.12.24:
 
+Example in draft-cbor-packed compressed to 503 bytes of 1210, or 41.6%,
+while CBAR example for same 1210 bytes data gave 535 bytes 1210, or 44.2%
+compression - and 2.6% difference is definetely not worth such waste of tags
+and simple values registration as draft-cbor-packed wants to.
+
       CBAR: CBOR and generic BLOBs by-Atom Reducing
       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+alternative
+
+  Dictionary management is not something was consistently done through
+  IETF protocols yet. JSON-LD did a good work, through using "@context", but
+  it focused mainly on human readability and editability, rather than on
+  compression. RADIUS protocol had something similar to atoms in the sense of
+  integer mapping to strings, but dictionary had to be set up manually by
+  network administrator matching on both sides. YANG in CBOR used concept of
+  SID, while simple to implement, avoiding dictionary management at all - it
+  is globally unique and "set in stone" forever, even if specification is
+  later corrected or withdrawn, thus reducing possible compression ratio.
+  Moreover, current specification does not attempt to compress YANG bits
+  (tag #6.43), while CBAR capable to do it. And CBOR-LD draft, as of end of
+  December 2024, did not proceed to clear architecture or at least adequately
+  readable specification, while trying to allocate rather large set of tags
+  (see e.g. [https://github.com/json-ld/cbor-ld-spec/issues/38]), so there are
+  good chances that CBOR-LD could be instead replaced by small specification
+  on top of CBAR about exact format of dictionary references (e.g. register
+  a tag) and how to interpret retrieved content from them to CBAR needs.
 
 packing of CBOR sequences - cbor-packed not, CBAR allows
 
@@ -817,8 +842,6 @@ pre-setup - possible e.g. as CBOR sequence
 TBD use 22098 for recursive "after unpacking, there are more CBAR inside"?
 TBD alternatives (tag 121) for multiple dictionaries?
 
-alternative to YANG SID (avoid uniqueness management) and YANG bits (#6.43)
-and CBOR-LD (may be even JSON-LD)
 
   The format is described in terms of unpacker copying data from input to
   target unpacked CBOR which later can be feed to generic CBOR decoder,
@@ -914,6 +937,8 @@ strings are typically already in implementation memory, opposed to bytedict
   a binary string, just tagged as CBOR Sequence, then tag is moved out:
 
     #6.63(#6.10("binary string")
+
+TBD 10.01 02:40 or that tag could be just inside binary string itself?
 
   This way, tag #6.10 could be used just for binary strings unpacking, not
   altering CBOR tree structure at all - hence "B" in "CBAR" is for generic
@@ -1218,7 +1243,7 @@ TBD is it?
   /bytedict/"",                                                   / = 1 byte /
   /CBAR/#2.308<                                                  / = 3 bytes /
   / { "name": "MyLED",       "interactions":              [      / 9+13+1    /
-    A6 7C 07   65 4D794C4544  6c 696E746572616374696F6E73 86     / = 23 bytes/
+    A6 7C 07   65 4D794C4544  6C 696E746572616374696F6E73 86     / = 23 bytes/
 
   / {  "links": [  {  "href": "http://192.../rgbValueRed"         = 11 bytes /
     A5 7C 09    81 A2 7C 0A   78 35 F9       C1
@@ -1516,6 +1541,22 @@ alternative with scoping exists
 TBD a way in DICT-REF to refer some variable? e.g. an API call sets
 a var in decoder to some Message-Id before each message, then it may be used
 for store() and import() like a template mechanism?
+- mb bad idea
+
+TBD 07.01.25 some values for dict-ref to be well-known (Standards Action)
+dictionaries? e.g. those which will include "@context" etc. atoms?
+- half-float: dict in mantissa, it's version in exponent (then for what sign?
+  private?)
+  - 09.01.25 23:40 may be also with float and double: mantissa as organization
+    id, exponent as dictionary id; or if private (sign), then dict id mantissa
+    and exponent version; use only "normal" numbers (no Inf/NaNs); math.h has
+    ldexp(), frexp(), ilogb(), scalbn() possibly usable for extracting
+
+   The "enterpriseId" parameter MUST be a 'SMI Network Management
+   Private Enterprise Code', maintained by IANA, whose prefix is
+   iso.org.dod.internet.private.enterprise (1.3.6.1.4.1).  The number
+   that follows MUST be unique and MUST be registered with IANA as per
+   RFC 2578 [RFC2578].  An enterprise is only authorized to assign
 
 TBD recursion problem (nested CBAR after unpacking bytestr) - a tree of dicts?
 - or better prohibit recursion at all in favor of scoping? as it requires
@@ -1529,7 +1570,50 @@ TODO examples to DICT-REF:
 
   ### Function 'Z' - zdict() for two-phases compression
 
-  Mnemonic: zip/zli/zstd/etc. dictionary
+  Mnemonic: zip/zlib/zstd/etc. dictionary
   inflateSetDictionary()
+
+TBD 06.01.25 for nested scopes, it may be beneficail to use tag #6.10 on just
+individual elements, e.g. strings, but #6.10(tstr) will likely produce invalid
+CBOR - so a way to say "it's text string with MULTIPLE atoms inside", as for
+single atom there is #6.10(uint)
+- this is already possible with e.g. 7A LL inside, but will require tag 24 to
+  enable IN_CBOR state, so it's at least 3+L byte overhead in comparison to bstr
+- not quite, outer length is not equal to inner length for multiple atoms
+
+TBD 07.01.25 in nested, only leaf could be complete #6.10([dict, bstr]), outer
+forced to individual elements and sequences - what if allow CBAR element to be
+actual CBOR instead of bstr for middle scopes? akin to 256() namespaces
+- so untagged map/array let's be just CBOR, otherwise it's compression
+  - what for types which have tag on outer level? use 22098 ? and
+    22098(22098(...)) if it was really 20098 ?
+
+TBD 07.01.25 morn thinking process: Tag #6.10 is like $var in POSIX shell,
+recursion is like `eval` in shell, generalize it to Tcl `{}` as FC copy for
+recursion prepended by command? or better have `apply()` function and set up
+dictionaries at once, then use them via 128 Alternatives Tags, and use FE code
+with VarInt where values are same as in 128 Alternatives Tags
+- 09.01.25 23:10 for apply(), use codes 128..255 as dictionary+128 for
+  Alternatives Tags ('=' may be used as for 'current' without argument);
+  #6.10(#6.alternative(array)) may be used as a namespace for arrays (instead
+  of dictionary setup)
+  - 10.01 02:27 what if uncompressed CBOR element also had Alternatives Tag on
+    it? repeat #6.10 again as a "stop code" ? consume only one Alternatives
+    Tag when having two (second of value itself) ? or just throw this problem
+    away to simplify spec, as bytestring variant is always available?
+    - 10.02 20:30 Tag Substitution principle dictates moving such tag out:
+      for dictionary 2 == Alternative Tag 123, compressed and uncompressed:
+
+        #6.121(#6.10(#6.123({"key": value}))) == #6.121({"key": value})
+
+  - 10.01 03:17 where to reset Alternatives dictionaries? if all dictionaries
+    were set up in one CBOR Sequence in a manner import(ref1), apply(),
+    import(ref2), apply() then it is for next sequence so useless to have
+    "one CBOR sequence" scope... have a nextmessage() method in decoder for
+    message boundaries? `$cbor->incr_reset`
+
+TBD 07.01.25 better for CBAR element for "later in stream" to be always
+substituted - use tag #6.31(undefined) to cut completely?
+
 
 TODO
