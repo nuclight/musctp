@@ -3502,6 +3502,43 @@ and if equal then shorter length is less)
   - do such string convertation only in implementation, not on wire? with
     #6.40 it's not map anyway so languages with string-only hash keys support
     not a problem
+    - 15.01.25 21:26 see 14.01.24: if the entire tree is just CBOR document
+      itself (with path-addressable leaf marked with some tag, so trying to
+      set intermediates will give error), then sort order will be achieved
+      automatically for arrays and for maps if they are implemented by already
+      sorted structure (B-tree, RB-tree); this also naturally solves repeating
+      paths problem for GetBulk/GetNext as in CBOR itself they are not
+      repeated - just need to somehow solve "truncated"/"restart from" problem
+      and register a tag for "symlink"/"mount" a subtree (being a path). So,
+      #6.40 will be needed only for Set_Value with multiple values at once
+      ...or even without #6.40? just `perl -E` example from `cbar.txt` enough?
+      well, if go further to `sysctl()` analogy then notice single `sysctl()`
+      has both get and set in one syscall determined by non-NULL arguments
+      (this nicely fits to RPC calls (SYSCTL_PROC) as "set" has arguments as
+      input, but also must return answer), so #6.40 may be used to emulate a
+      series/batch `sysctl()` for multiple values in one message
+      - if truncation is done as bytestring then concatenate with next
+	bytestring, this is a DoS vector... even more, any bulk requests may
+	be a DoS vector
+      - what about enumerating just names, `sysctl -N` ? may be useful when
+	values are large... answer with some placeholder/"absent" tag instead
+	of value? return estimated size of value instead of value (again
+	tagged)? again may be unnecessary load on server
+	- no, no "estimated" - RPC calls will not know it without call
+      - #6.40 may still be needed if we ever support additional columns, like
+	type or description... but do we really need in L4/L5 protocol,
+	not application protocol? if only for debug purposes
+      - allow intermediate nodes be also settable if (yet another) special tag
+	on node allows it? e.g. to set a subtree with features or dictionaries
+	at once? use this instead of bulk Set_Value?
+	- if we don't need additional flags, then same (single) tag may be
+	  used for both intermediate and leaf values... or we need, for R/W
+	  and SYSCTL_PROC?
+      - for "symlink"/"mount", abuse tags 110/111/112? it will even conform to
+	RFC 9090 if strings in path for map keys will be text strings
+	(Major Type 3)
+      - what to do in GetBulk/GetNext/subtree for SYSCTL_PROC nodes? put
+	a placeholder? TODO look into what `sysctl -a` does for such procs
   - then string-length bytes also should be replaced in implementation, so
     that "assoc" sorts after "algorithm" (would be opposite by length), see
     also https://sqlite.org/src4/doc/trunk/www/key_encoding.wiki
@@ -3523,6 +3560,14 @@ queried values?
   session-stable `rowid` instead path array
   - it will be different on each side for most entries, and problematic for
     implementations to have two trees
+
+TBD 14.01.24 02:50 reading EBML [RFC 8794] - it has paths and Elements of
+unknown size: what if Sesctl tree of elements is just like an indexed view to
+file, mmap window?
+<<Only a Master Element is allowed to be of unknown size, and it can only be so if the `unknownsizeallowed` attribute of its EBML Schema is set to true>>
+-- so the entire sysctl tree may be just CBOR tree with some nodes being
+accessible by path, but where leaf could be complex CBOR value as well;
+attributes and SYSCTL_PROC could be represent by CBOR tags in such tree
 
 TODO
 

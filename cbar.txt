@@ -808,15 +808,71 @@ TBD what if use simple(0)..simple(15) for first atoms? so mb change varint to 24
 
 === 15.12.24:
 
+This is proposed alternative to draft-cbor-packed as it's complete
+replacement.
+
 Example in draft-cbor-packed compressed to 503 bytes of 1210, or 41.6%,
 while CBAR example for same 1210 bytes data gave 535 bytes 1210, or 44.2%
 compression - and 2.6% difference is definetely not worth such waste of tags
 and simple values registration as draft-cbor-packed wants to.
 
+Short PROs and CONs of CBAR over cbor-packed:
+
++ supports placing any number of compressible substrings anywhere, including
+  CBOR fragments; cbar-packed supports only complete, prefix or suffix
+  replacement (talking about single step here)
++ packing of CBOR sequences - cbor-packed not, CBAR allows (a consequence of
+  previsous point)
++ generic but simple to implement: cbor-packed overcomes aforementioned
+  limitation by recursive reference tracking and join functions - but this is
+  complex to implement and solves just some ad-hoc cases and not completely
++ uses just ONE tag, cbor-packed uses millions of tags
++ supports packing not only CBOR, but also generic unstructured BLOBs, e.g.
+  a single bytestring inside CBOR document or even non-CBOR application
+  message
++ has a generalized solution for dictionary management
++ has a support for secondary compression by traditional algorithms, e.g.
+  deflate, providing a dictionary for it
+- most compression is inside binary string: thus cbor-packed is more readable
+  by tools giving diagnostic notation but not supporting CBAR
+- compression is slightly worse than cbor-packed (by 2.6% on LED example)
+- will not handle well if CBOR itself will ever be extended by new bytecodes
+  (will be able to copy it as literal, but not utilize)
+
+Everything is discutable, including name: it was initially born for specific
+protocol's (muSCTP) needs as "compact binary arrays representation" in a try
+to be more compact than CBOR by doing on sub-byte level, but was abandoned as
+achieved compression (10 bytes vs 11 of CBOR in typical header) was considered
+not justifying increased complexity of implementation, so switched to generic
+CBOR compression scheme.
+
+Most discutable is multiple-dictionaries-in-document management: in contrast
+to external references (e.g. SHA-256 of well-known stable dict), this is
+about volatile like "@context" in JSON-LD, so I did not decided which variant
+to take - end of file is currently bunch of semi-structured mind-stream of
+TBDs.
+
+As dict management is open research problem, any comments are appreciated.
+
       CBAR: CBOR and generic BLOBs by-Atom Reducing
       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-alternative
+  This is a format for compression of both unstructured raw BLOBs and CBOR
+  documents by concept of "atom" (see Lisp and X11 windowing system) - a short
+  integer used instead of (probably very) long string. A set of atoms, that
+  is, mapping between integers and strings, is called "dictionary" here, using
+  "just" this word (there is also "byte dictionary" meaning a pre-supplied
+  block of bytes to compressors supporting it, like zlib or zstd). Reason for
+  using atoms is that such strings are typically already present in
+  (constrained) implementation's memory (as opposed to byte dictionary). CBAR
+  provides facilities for dictionary management: as different CBOR documents
+  will require different sets of atoms for better compression, dictionaries
+  can be referenced from outside, changed on the fly throughout document, etc.
+
+-- as this "draft of draft" is currently being discussed in comparison to
+   [draft-ietf-cbor-packed], it is currently terse, assuming reader at least
+   barely familiar with things discussed in CBOR WG mailing list and
+   cbor-packed draft
 
   Dictionary management is not something was consistently done through
   IETF protocols yet. JSON-LD did a good work, through using "@context", but
@@ -836,35 +892,61 @@ alternative
   on top of CBAR about exact format of dictionary references (e.g. register
   a tag) and how to interpret retrieved content from them to CBAR needs.
 
-packing of CBOR sequences - cbor-packed not, CBAR allows
-
-pre-setup - possible e.g. as CBOR sequence
-TBD use 22098 for recursive "after unpacking, there are more CBAR inside"?
-TBD alternatives (tag 121) for multiple dictionaries?
-
+  Moreover, even ASN.1/X.509/RFC 9090 examples could be reduced by CBAR, e.g.
+  example their about "buildingName (0.9.2342.19200300.100.1.48)" encoding is
+  longer than would be typical atom, and for other 3 byte examples chances are
+  atom could be 2 bytes.
 
   The format is described in terms of unpacker copying data from input to
   target unpacked CBOR which later can be feed to generic CBOR decoder,
   however, it is possible, though hard, to implement in-place access to
   CBAR data (like in draft-cbor-packed), if application wish so and is
-  constrained in RAM but not ROM.
-strings are typically already in implementation memory, opposed to bytedict
+  constrained in RAM but not ROM. Thus, CBAR is designed so it does not
+  prohibit such implementation directly in CBOR decoder - however,
+  implementers are warned that this is error-prone. In other words, CBAR can
+  be viewed as a simple templating mechanism for CBOR like a POSIX Shell could
+  be used as a simple templating mechanism for text: that is, a text is
+  a sequence of variable assignments and variable substitutions, possibly
+  utilizing previous variables, and so on.
+
+  In-place access to CBAR (and in-place access in cbor-packed), however, is
+  analogous to POSIX Make(1) utility - where variable expansion is deferred
+  until actual use, often requiring to track them recursively - which is
+  frequently hard to maintain even for human dealing with text Makefiles,
+  implementing it "like make" for binary format can be even harder.
+
+  CBAR allows for dictionary setup both outside of CBOR document (the main
+  value is that atoms don't need to be passed with each application message)
+  and inside, both as part of CBOR structure, or pre-setup - e.g. as CBOR
+  sequence previous to current one.
+
+  An (incomplete) CDDL for CBAR is shown here as a brief overview. As most of
+  this documents deal with raw bytes, not everything could be expressed as
+  CDDL and/or EDN so it wasn't polished/corrected.
 
    CBAR-CBOR = #6.10([atoms, bytedict, CBAR, ? checksum])  ; 0x0a for "Atom"
+             / #6.10([ (+ commands), CBAR, ? checksum])    ; full form
              / #6.10(CBAR)    ; binary string - everything other setup earlier
 
    atomarr = [ + atom ]       ; "atom" is like in X11 sense - number of string
    atom = bstr                ; raw value
+        / tstr                ; contents as raw value
         / #6.10(bstr)         ; itself CBAR - definition uses previous atoms
 	/ any                 ; valid CBOR fragment to substitute
 
-   atoms = atomarr / map / uint / bstr, ; atoms array (mb empty) or their hash
+   atoms = atomarr / uint / bstr,    ; atoms array (mb empty) or their hash
    bytedict = bstr / uint,           ; byte dictionary (mb empty) or it's hash
    CBAR = null / bstr .size (3..),   ; may have e.g. 40003 tag if DEFLATE'd
    checksum = uint
 
   In atom definitions, each definition MUST use only prior atom numbers if
   it's CBAR itself (that is, defined with #6.10 tag).
+
+  An atom MUST be for a string with at least 3 bytes long, and representation
+  of atom SHOULD be shorter than string itself (or compression will not be
+  achieved, leaving just templating).
+
+TBD use 22098 for recursive "after unpacking, there are more CBAR inside"?
 
   ## Model of operation.
 
@@ -940,6 +1022,8 @@ strings are typically already in implementation memory, opposed to bytedict
 
 TBD 10.01 02:40 or that tag could be just inside binary string itself?
 
+TODO table of #6.10 sequences variants TBD where to put Alternatives if 63/24?
+
   This way, tag #6.10 could be used just for binary strings unpacking, not
   altering CBOR tree structure at all - hence "B" in "CBAR" is for generic
   BLOBs. And both methods could be combined in same CBOR stream.
@@ -958,7 +1042,8 @@ TBD is it?
   The other possible application of Tag #6.10 is on integers, where integer is
   atom number, expanding to a single string, with positive integers expanding
   to binary strings (Major Type 2) and negative to text strings (Major Type
-  3) TBD mnemonic is to add 2 to major type, but is it friendly?
+  3)
+TBD mnemonic is to add 2 to major type, but is it friendly?
 
   This is in fact just another way to write #6.10(#6.24(h'7C /atom num/') or
   with "5C" for binary string, saving a byte for atom numbers less than 65536
@@ -969,10 +1054,30 @@ TBD is it?
   * a tag with a number is more readable in Diagnostic Notation than binary
     string with a prefix and varint
 
+==probably remove this:
   And last use of Tag #6.10 is on undefined as map key (that is, two bytes
   0xDA 0xF7), where map's value for such key is array for dictionary setup
   (that is, in which CBAR member is null). It is described later in section
   on nesting decitionaries.
+==/probably remove
+
+  A tag #6.10 on map with Alternatives Tag (121+) defines a "namespace" where
+  another dictionary is used - that is, it allows for multiple dictionaries
+  in one message, on different level (think of JSON-lD's "@context"). Recall
+  image above:
+
+   {                      ; level 1 - default dictionary
+     [                    ; level 2 
+       #6.10(#6.123({     ; level 3 uses dictionary numer 3
+               #6.10(1),  ; expanded to "foobar"
+	       ...
+             })),               
+             #6.10(s2),   ; level 2 again
+	     #6.10(1),    ; expanded to "quux"
+
+  The same is for arrays, but to distinguish from dictionary setup, using
+  #6.10 on namespace as array MUST always have Alternative (e.g. #6.121 for
+  default 0), and dictionary setup MUST NOT have an Alternative Tag on it.
 
   All other uses of Tag #6.10 are reserved for future use and MUST NOT be
   emitted by conforming encoders for now version.
@@ -1076,6 +1181,8 @@ TBD is it?
   FF             - Copy remaining_bytes literal bytes
   any other byte - Output this byte
 
+FIXME need Extended functions for Alternatives here!
+
   Any output operation decrements `remaining_bytes` variable by the size of
   chunk output, and in well-formed input it MUST not became less than zero.
   If `remaining_bytes` became zero (0), state is changed to IN_CBOR.
@@ -1091,7 +1198,7 @@ TBD is it?
 	     few bytes - instead, for performance of decoder, FC code with
 	     length should be used, allowing to skip to next code.
 
-  Opcodes of IN_CBOR state, with <arguments> (and mnemonics):
+  Opcodes of IN_CBOR state, with <arguments> (and (mnemonics)):
 
   1C <3 bytes>   - (terCio) Output 1A 00 <3 bytes>
   1D             - Atom 0
@@ -1119,7 +1226,7 @@ TBD is it?
   DF             - Atom 17
   FC <VarUInt30> - Copy N Literal bytes, N MUST be greater than 1
   FD <VarUInt30> - Decompress (dispense) atom N, N>17
-  FE             - Extended functions (reserved)
+  FE <VarUInt30> - Extended functions
 
   Decoder in IN_CBOR state expects same codepoints as in standard-conformant
   CBOR, plus actions from the table above. That is, on every standard element,
@@ -1213,6 +1320,16 @@ TBD is it?
   implementation that atoms after expanding are immediately entered into
   internal table, in contrast to CBOR stream, where expanded contents is then
   fed to generic CBOR decoding process.
+
+  #### Extended functions
+
+  These are currently defined only for numbers 121-127 and 1280-1400, to be
+  on par with Alternatives Tags encoding. But in contrast to using tags on
+  structural CBOR elements, inside binary string these extended functions just
+  switch dictionaries without keepin state - and tags do "push" and "pop" on
+  stack levels.
+
+  ### Examples
 
   Example from draft-cbor-packed, in higher compression variant (this is not
   quite CBOR diagnostic notation but hex codes for bytes should be familiar):
@@ -1353,6 +1470,17 @@ TODO atoms length < 3 prohibited -> integers < 256 to splice are array numbers
   functions - are single-character strings. However, in this specification
   they are usually referred by meaningful names, not just mnemonics.
 
+  Note that operations MUST be single-byte string, and for codes in
+  ASCII range text strings MUST be treated equivalent to binary strings (major
+  type ignored). Codes 128-255 are, of course, allowed only in binary strings,
+  not UTF-8 ones.
+
+  Rationale: single byte allows to save additional byte (0x41/0x61) in
+             application protocols which set up dictionaries themselves.
+	     Equivalence of text/binary is for more handy diagnostic notation
+	     and languages/libraries where it could be more comfortable to
+	     prefer one variant over another.
+
   Operation for dictionary setup in decoder is as follows. At start of array,
   temporary variable space is created, which could be viewed as array of
   arrays: there are variables numbered from 0 to maximum possible 255
@@ -1467,22 +1595,6 @@ TODO atoms length < 3 prohibited -> integers < 256 to splice are array numbers
                    unshift(a,x,y)      splice(a,0,0,x,y)
                    a[i] = y            splice(a,i,1,y)
 
-               "splice" can be used, for example, to implement n-ary queue
-               processing:
-
-                   sub nary_print {
-                     my $n = shift;
-                     while (my @next_n = splice @_, 0, $n) {
-                       say join q{ -- }, @next_n;
-                     }
-                   }
-
-                   nary_print(3, qw(a b c d e f g h));
-                   # prints:
-                   #   a -- b -- c
-                   #   d -- e -- f
-                   #   g -- h
-
   Example:
 
 TODO
@@ -1558,6 +1670,8 @@ dictionaries? e.g. those which will include "@context" etc. atoms?
    that follows MUST be unique and MUST be registered with IANA as per
    RFC 2578 [RFC2578].  An enterprise is only authorized to assign
 
+TBD 15.01.25 there is Tag 112 relative to 1.3.6.1.4.1
+
 TBD recursion problem (nested CBAR after unpacking bytestr) - a tree of dicts?
 - or better prohibit recursion at all in favor of scoping? as it requires
   additional memory and tree of dicts is too complex
@@ -1568,10 +1682,13 @@ TODO examples to DICT-REF:
    tag 18540 (= 18556 + (-16)) is the tag for a byte string containing a
    SHA-256 hash.
 
+
+
   ### Function 'Z' - zdict() for two-phases compression
 
   Mnemonic: zip/zlib/zstd/etc. dictionary
   inflateSetDictionary()
+
 
 TBD 06.01.25 for nested scopes, it may be beneficail to use tag #6.10 on just
 individual elements, e.g. strings, but #6.10(tstr) will likely produce invalid
@@ -1614,6 +1731,28 @@ with VarInt where values are same as in 128 Alternatives Tags
 
 TBD 07.01.25 better for CBAR element for "later in stream" to be always
 substituted - use tag #6.31(undefined) to cut completely?
+
+TBD 16.01.25 functions '1'..'9' for byte compression params (match Septinovile)
+
+  ### Function '0' - reset()
+
+  Mnemonic: zero out everything
+
+  Return value: no.
+
+  Functional description:
+
+       reset 
+               Removes all numbered dictionaries and all temporary variables.
+
+  ### Functions 128-255 - apply() to dictionary number
+
+  These are special in that they contain argument in code itself: it means
+  take current set of temporary variables and save them in temporary
+  dictionary N, where N=code-128. These dictionaries are later used by
+  Extended Functions or Alternatives Tags - there are exactly 128 alternatives
+  tags taking "any" data item, perfectly matching high range of 8-bit byte.
+
 
 
 TODO
