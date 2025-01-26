@@ -32,9 +32,12 @@ This procedure was first proposed by D. D. Clark and David L. Tennenhouse.[1] It
   *  The ADUs can be processed in any order.
   *  The lower layers keep the ADU borders.
 
-30.11.24 descrive that L4 knowing how many bytes app wants to transmit is
+TODO 30.11.24 describe that L4 knowing how many bytes app wants to transmit is
 beneficial for things like scheduling over multipath and e.g. Section 6.3.1 of
 RFC 9049 describes why Quick-Start should be for bulk flows
+- 25.01.25 https://arxiv.org/pdf/2210.00714 about Homa has a good list of TCP
+  problems in this respect, e.g. scheduling Shortest Remaining Processing Time
+  for "task to completion" - may be additional attribute to message here?
 
 
 [QUIC-APPLICABILITY]:

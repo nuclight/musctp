@@ -1045,6 +1045,9 @@ TBD is it?
   3)
 TBD mnemonic is to add 2 to major type, but is it friendly?
 
+TODO 23.01.25 #6.10(24(uint)) must expand to complete CBOR item
+- 24.01.25 and #6.10(63(uint)) to CBOR Sequence, but only inside array
+
   This is in fact just another way to write #6.10(#6.24(h'7C /atom num/') or
   with "5C" for binary string, saving a byte for atom numbers less than 65536
   and having additional benefits:
@@ -1352,7 +1355,7 @@ FIXME need Extended functions for Alternatives here!
   / #13 (11 bytes)  #14 (10 bytes)  #15 (5 bytes)  #16 (9 bytes)   = 35 bytes/
 
     #6.10(#6.63(#2.18 "outputData": { "valueType": { "type": "number" } } )),
-  / #17 (CA D83F 52 6F FD0D A1 49 FD0E A1 44 FD0F 46 6E756D626572 -> 22 b) /
+  / #17 (CA D83F 52 6A FD0D A1 49 FD0E A1 44 FD0F 46 6E756D626572 -> 22 b) /
 
     ["Property"],                 "colorTemperatureChanged",
   / #18 (81 48 68 ..-> 10 bytes)  #19 (24 bytes)                  = 34 bytes /
@@ -1442,6 +1445,84 @@ FIXME need Extended functions for Alternatives here!
   for a 2+1+220+1+3+308 = 535 bytes total, which could be reduced to 529 by
   eliminating three FC xx codes (left for demonstration).
 
+  #### Explanation of selected moments in this example
+
+  Let's see for first items of atoms table (there is single table in CBAR
+  instead of shared/argument split):
+
+  #6.10([                                                         / 2 bytes /
+    /atoms/[                                                      / 1 byte  /
+      "rgbValue",   #6.10(#2.11 C0 "Red"),  #6.10(#2.13 C0 "Green"),
+    / #0 (9 bytes)  #1 (CA 4B C0 52 65 64)  #2 (8 bytes)         = 23 bytes /
+
+  here you see for index #1 bytes in parentheses corresponding to string
+  "rgbValueRed" - the #6.10 tag is 0xCA, then 0x4B is CBOR's Major Type 2 of
+  lenth 11 - that's what "rgbValueRed" will have in uncompressed form. Then
+  0xC0 refers to Atom 0 - like `simple(0)` for cbor-packed would be. It is
+  taken, then 0x52 0x65 0x64 are ASCII for "Red" - here is trick for IN_BLOB
+  state each byte not being a command just means itself. The "correct" sequence
+  would be FC 03 52 65 64 - FC for "copy literal", then 03 bytes, then bytes
+  themselves - but here we trade off speed (going i++ byte-by-byte) for size,
+  saving 2 bytes.
+
+    #6.10(#2.12 C0 "Blue"), "http://192.168.1.10",
+  / #3 (7 bytes)            #4 (20 bytes)                         = 27 bytes /
+
+    #6.10(#2.35 F7 "3:8445/wot/thing")), #6.10(#2.42 F8 "/MyLED/"),
+  / #5 (CA 58 23 F7 ..-> 20 bytes )      #6 (CA 58 3A F8 ..-> 11 bytes) = 31 /
+
+  Atom 4 (`simple(4)` for cbor-packed) is encoded as 0xF7 while IN_BLOB state,
+  other is same: 0x58 0x23 is just CBOR Major Type 2 for 35 bytes, but it's not
+  interpreted as CBOR because state is IN_BLOB - so here it is those "just
+  template in a bytestream".
+
+    "name", "@type",  "links",  "href",   "mediaType", "application/json",
+  / #7 (5 b) #8 (5 b)  #9 (6 b)  #10 (5 b)  #11 (10 b)  #12 (17 b)    = 48 b /
+
+  everything is simple here.
+
+    "outputData",   "valueType",    "type",        "writable",
+  / #13 (11 bytes)  #14 (10 bytes)  #15 (5 bytes)  #16 (9 bytes)   = 35 bytes/
+
+    #6.10(#6.63(#2.18 "outputData": { "valueType": { "type": "number" } } )),
+  / #17 (CA D83F 52 6A FD0D A1 49 FD0E A1 44 FD0F 46 6E756D626572 -> 22 b) /
+
+  Here more interesting entry. #6.63 after #6.10 switches to IN_CBOR state (and
+  enables consistency checking if decoder implements it). CA D83F 52 is just
+  both tags and start of bstr where all following lives. 0x6A is
+  for CBOR Major Type 3 of length 10. Then 0xFD 0x0D tells
+  to do Atom 0x0d, that is, "outputData" at index 13 decimal. 0xA1 is usual CBOR
+  Map of one pair for outer {}, then 0x49 is string in which Atom 0x0E expands
+  to "valueType", inner 0xA1 map, "type" by Atom 0x0F=15, and finally "number"
+  goes as is in CBOR, with it's 0x46 leading byte and ASCII ones.
+
+  Now, final CBOR document wrappend in one 308-byte bstr:
+
+  /CBAR/#2.308<                                                  / = 3 bytes /
+  / { "name": "MyLED",       "interactions":              [      / 9+13+1    /
+    A6 7C 07   65 4D794C4544  6C 696E746572616374696F6E73 86     / = 23 bytes/
+
+  / {  "links": [  {  "href": "http://192.../rgbValueRed"         = 11 bytes /
+    A5 7C 09    81 A2 7C 0A   78 35 F9       C1
+
+  Note that it uses the same code already shown for atom table setup entries
+  above - just that, by definition, here decoder starts IN_CBOR state without
+  explicit tagging. And in this state set of opcodes differs, extending standard
+  CBOR ones: e.g. 0x7C is like 0x78..0x7B of standard CBOR, but means "convert
+  to such string value of that atom" - atom 7 in our case. As length of Atom is
+  known because value is known - "name" has length 4, so 0x64 and ASCII "name"
+  will be decoded.
+
+  Final element on this quote demonstrate IN_CBOR/IN_BLOB state switching. After
+  decoding you'll get "http://192.168.1.103:8445/wot/thing/MyLED/rgbValueRed" -
+  this is 0x35 bytes, so you see standard CBOR Major Type 3's 0x78 35 beginning
+  here. Now, decoder understands this is CBOR string and initializes
+  `remaining_bytes` variable to 0x35, going to IN_BLOB state. Here it sees 0xF9
+  meaning Atom 6 - which expands to "http://192.168.1.103:8445/wot/thing/MyLED/"
+  and `remaining_bytes` is decremented by it's length. Now 0xC1 means Atom 1,
+  also decrements variable - it reaches 0, so decoder switches again to IN_CBOR
+  state. And so on...
+
 TODO non-high-compression but "encoder-implementation-friendly" variant for at
 most 1 atom per string (repeated strings only), with additional LZ pass
 - and with full form dict
@@ -1454,7 +1535,7 @@ dictionary on many documents; or VarInt64 may be other identificator, e.g.
 
 for map merging, tag 63 Encoded CBOR Sequence may be used,
 cbor-records 57342-57599 also instead of tag 114
-
+- 24.01.25 Alan DeKok suggests both may be used, not quite replacement
 
 TODO atoms length < 3 prohibited -> integers < 256 to splice are array numbers
   - just list as (* opcode => ?argument), e.g.
@@ -1539,6 +1620,9 @@ TODO atoms length < 3 prohibited -> integers < 256 to splice are array numbers
   Descriptions are given as if copies are made, implementations are free to
   use optimization techniques like copy-on-write, however.
 
+  For examples below, dictionary referenced by 12345678 is assumed to have
+  contents ["A","B","C","D","E","F","G","H"].
+
   ### Function '@' - import() dictionary
 
   Mnemonic: operate AT copy of referenced dictionary.
@@ -1598,6 +1682,41 @@ TODO atoms length < 3 prohibited -> integers < 256 to splice are array numbers
   Example:
 
 TODO
+
+  ### Function '#' - fill() array with null's
+
+  Mnemonic: change number of elements in array.
+
+  Return value: no.
+
+  Functional description:
+
+       fill ARRAY, NEWMAX
+               Makes specified array variable have it's last index be NEWMAX,
+	       or speaking possible implementation low-level C words, make
+	       `realloc()` for array variable to hold NEWMAX+1 pointers to
+	       elements. If NEWMAX is less than current array's last index,
+	       array is trimmed (shorter encoding than splice() for offset as
+	       there is no return value). If NEWMAX is greater than current
+	       last index, then fill newly added elements with null values
+	       (splice() is not allowed to silently create gaps as this is
+	       likely error in input data).
+
+  Example 1:
+
+      ['@', 12345678, '#', 0, 1 ...]
+
+    variable 0 now has contents ["A","B"].
+
+  Example 2:
+
+      ['!', [0,0,0, 1,2,3], '#', 0, 10, '!', [0,10,0,5,6,7], null, ...]
+
+    first slice() setups array 0 to be [1,2,3], then fill() makes it 11
+    elements long, second splice() inserts 3 elements at index 10, so finally
+    variable 0 has contents:
+
+      [1, 2, 3, null, null, null, null, null, null, null, 5, 6, 7, null]
 
   ### Function ':' - store() dictionary for later use
 
@@ -1684,9 +1803,12 @@ TODO examples to DICT-REF:
 
 
 
-  ### Function 'Z' - zdict() for two-phases compression
+  ### Function '^' - zdict() for two-phases compression
 
-  Mnemonic: zip/zlib/zstd/etc. dictionary
+  Mnemonic: to upper phase and ^ similar to letter 'z' of zip/zlib/zstd/etc.
+
+  Return value: no.
+
   inflateSetDictionary()
 
 
@@ -1703,7 +1825,7 @@ forced to individual elements and sequences - what if allow CBAR element to be
 actual CBOR instead of bstr for middle scopes? akin to 256() namespaces
 - so untagged map/array let's be just CBOR, otherwise it's compression
   - what for types which have tag on outer level? use 22098 ? and
-    22098(22098(...)) if it was really 20098 ?
+    22098(22098(...)) if it was really 22098 ?
 
 TBD 07.01.25 morn thinking process: Tag #6.10 is like $var in POSIX shell,
 recursion is like `eval` in shell, generalize it to Tcl `{}` as FC copy for
@@ -1718,7 +1840,7 @@ with VarInt where values are same as in 128 Alternatives Tags
     it? repeat #6.10 again as a "stop code" ? consume only one Alternatives
     Tag when having two (second of value itself) ? or just throw this problem
     away to simplify spec, as bytestring variant is always available?
-    - 10.02 20:30 Tag Substitution principle dictates moving such tag out:
+    - 10.01 20:30 Tag Substitution principle dictates moving such tag out:
       for dictionary 2 == Alternative Tag 123, compressed and uncompressed:
 
         #6.121(#6.10(#6.123({"key": value}))) == #6.121({"key": value})
@@ -1733,6 +1855,15 @@ TBD 07.01.25 better for CBAR element for "later in stream" to be always
 substituted - use tag #6.31(undefined) to cut completely?
 
 TBD 16.01.25 functions '1'..'9' for byte compression params (match Septinovile)
+
+TBD 24.01.25 letter functions for extensions, big (capital) with return value
+and small (lower case) when no return value - e.g. [draft-dns-cbor] needs
+custom adding for all suffixes; also allow 2 bytes for "spec required" and 3+
+for FCFS but MUST NOT be usable outside of CBOR - single-byte are for lower
+layer application protocols when it's not only CBOR; so e.g. "nc",N from
+[draft-dns-cbor] may define CBAR member must not be a bytestring but real CBOR
+where strings are counted and added with all their suffixes as CBOR sequences
+to dictionary N
 
   ### Function '0' - reset()
 
@@ -1753,6 +1884,116 @@ TBD 16.01.25 functions '1'..'9' for byte compression params (match Septinovile)
   Extended Functions or Alternatives Tags - there are exactly 128 alternatives
   tags taking "any" data item, perfectly matching high range of 8-bit byte.
 
+TODO
+
+  Appendix C. Compress::LZF
+
+TODO
+
+  # Appendix D. Example of application-defined function, on DNS example.
+
+  Function "nc" takes one argument - dictionary number where to place scanned
+  strings. It is needed to correctly distinguish references to built
+  dictionary - e.g. to use only #6.10(#6.123(uint)) references if the
+  dictionary selected is number 3, leaving other dictionaries for possible other
+  packing tables. First CBAR-rump element, which, when this function is present,
+  MUST be CBOR and not a bstr (though some elements, excluded from this, may
+  be #6.10(bstr)'s), is scanned to build dictionary which number specified in
+  argument. Then, in second pass, CBAR-rump element is unpacked as usual (or
+  accessed in-place without intermediate buffer, if particular implementation
+  allows it).
+
+TODO more description
+
+  Take the following CBOR object _o_ (note that this is intentionally not
+  legal "application/dns+cbor" to illustrate generality).
+
+  [
+    ["www", "example", "org"],
+    ["svc", "www", "example", "org"],
+    ["org", "example", "org"], 42,
+    ["svc", "www", "example", "org"], 42
+  ]
+
+  This would generate the following dictionary _V_ with CBOR Sequences,
+  depicted arbitrarily in human form, as EDN does not support CBAR yet:
+
+    0: "www", "example", "org"
+    1: "example", "org"
+    2: "org",
+    3: "svc", Atom 0
+    4: "org", "example", "org"
+
+  e.g. for index 0 really #6.10(#6.63(bstr)) with bstr wrapping 3 strings in
+  it, or CA D83F 4F 63 777777 67 6578616D70 6C 65 63 6F7267 in binary,
+  and for index 3 it is CA D83F 45 63 737663 1D (tag 63 enables IN_CBOR state,
+  so Atom 0 is 0x1D here)
+
+  Note that the sequence "org", "example", "org" is added at index 4 with
+  leading "org", instead of referencing index 2 + index 1, as it is its own
+  distinct suffix sequence.
+
+  The packed representation of _o_ would thus be:
+
+  10(
+    [
+      "nc", 0,
+      [/CBAR/
+        ["www", "example", "org"],
+        ["svc", 10(63(0))],
+        ["org", 10(63(1))], 42,
+        [10(63(3))], 42
+      ]
+    ]
+  )
+
+NOTE that "MUST be CBOR" requirement for CBAR-rump limits effectiveness of
+compressing common IPv6 address parts: suppose Atom 6 has value of 11 zero
+bytes, then original 17-byte bstr for address 2001:db8::1
+
+    h'20010db8000000000000000000000001'
+
+will become
+
+    10(h'2001 0db8 F9 01')
+
+or 8 bytes CA 66 2001 0DB8 F9 01, while in bstr-wrapped CBAR-rump it could
+have been 7 bytes - tag omitted.
+
+TODO NB! requires standardizing that #6.10(#6.63(uint)) inside array "splice"
+elements of sequence into it, so array size grows and differs from original;
+also MUST prohibit such usage outside of arrays!
+
 
 
 TODO
+
+https://github.com/nuclight/musctp/blob/main/cbar.txt
+
+https://youtu.be/ktfH2jfU7ik?t=1822 : tag ranges on this slide (about "idiom")
+are occupying just a small fraction of corresponding range X+Y range - but
+cbor-packed differs radically
+
+37:00 little simulation that assumes that tables are used according to Zip's law
+-- not a real data!
+
+44:26 private tags -- what about namespace?
+
+45:35 in Json LD you know that uh you are processing a CURIE depending on where
+-- so CBAR tries to do with multiple dictionaries for this
+
+well, I'm not a PhD talked about, I'm just same level with less tags
+
+47:20 and know what that is doing because the pieces might be interfering with each
+47:25 other um there actually proposals right now for fixing the the
+47:31 original uh sharing uh tags that that have been defined for Pearl uh to to
+47:38 make this uh a little bit less vulnerable to composability
+47:43 uh
+47:52 problems is how is how is packed on not endangering that composability in the
+47:59 same way because a reference is not supposed to
+48:06 go outside of the the table set of tag that
+-- what is meant here?
+
+1:00:33 that that's really precious it's too bad that we cannot use the additional the free additional information space and
+1:00:40 I'm open to wild ideas there but the the compatibility issue
+-- CBAR solves it by wrapping in bstr
