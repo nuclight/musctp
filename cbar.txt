@@ -1329,7 +1329,7 @@ FIXME need Extended functions for Alternatives here!
   These are currently defined only for numbers 121-127 and 1280-1400, to be
   on par with Alternatives Tags encoding. But in contrast to using tags on
   structural CBOR elements, inside binary string these extended functions just
-  switch dictionaries without keepin state - and tags do "push" and "pop" on
+  switch dictionaries without keeping state - and tags do "push" and "pop" on
   stack levels.
 
   ### Examples
@@ -1370,7 +1370,7 @@ FIXME need Extended functions for Alternatives here!
   / "mediaType": "application/json" } ]                           =  4 bytes /
     7C 0B        7C 0C
   / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
-    FD 0D
+    FD 11
   / "name": "rgbValueRed", "writable": true,                      =  7 bytes /
     7C 05   7C 01          7C 10       F5
   / "@type": ["Property"] },                                      =  4 bytes /
@@ -1381,7 +1381,7 @@ FIXME need Extended functions for Alternatives here!
   / "mediaType": "application/json" } ]                           =  4 bytes /
     7C 0B        7C 0C
   / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
-    FD 0D
+    FD 11
   / "name": "rgbValueGreen", "writable": true,                    =  7 bytes /
     7C 05   7C 02            7C 10       F5
   / "@type": ["Property"] },                                      =  4 bytes /
@@ -1392,7 +1392,7 @@ FIXME need Extended functions for Alternatives here!
   / "mediaType": "application/json" } ]                           =  4 bytes /
     7C 0B        7C 0C
   / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
-    FD 0D
+    FD 11
   / "name": "rgbValueBlue", "writable": true,                     =  7 bytes /
     7C 05   7C 03           7C 10       F5
   / "@type": ["Property"] },                                      =  4 bytes /
@@ -1403,7 +1403,7 @@ FIXME need Extended functions for Alternatives here!
   / "mediaType": "application/json" } ]                           =  4 bytes /
     7C 0B        7C 0C
   / "outputData": { "valueType": { "type": "number" } },          =  2 bytes /
-    FD 0D
+    FD 11
   / "name": "rgbValueWhite",        "writable": true,             = 14 bytes /
     7C 05   6D C0 FC 05 5768697465  7C 10       F5
   / "@type": ["Property"] },                                      =  4 bytes /
@@ -1639,6 +1639,9 @@ TODO atoms length < 3 prohibited -> integers < 256 to splice are array numbers
 	       index of result is determined by solely size of outer array
 	       (i.e. a this is a push() operation).
 
+	       If argument is tagged with Tag 10, then value of corresponding
+	       atom is substituted to obtain actual argument.
+
   Example:
 
       ['@', 12345678, '@', #6.32("http://192.168.1.1:8443/main.dict"), ...]
@@ -1679,9 +1682,51 @@ TODO atoms length < 3 prohibited -> integers < 256 to splice are array numbers
                    unshift(a,x,y)      splice(a,0,0,x,y)
                    a[i] = y            splice(a,i,1,y)
 
-  Example:
+  Example 1 (like [draft-amsuess-cbor-packed-shuffle]):
 
-TODO
+    Let's have table A B C D E F G H in variable 0 and desired transformation
+    of it to be B E F G A C D H.
+
+    We could do this (in theory and calling array "a") as:
+
+      splice(a,0,0,splice(a,1,1)); splice(a,1,0,splice(a,4,3));
+
+    but our calls are linear only, so we use temporary variables 1 and 2:
+
+      t1 = splice(a,1,1);  /* a is now A C D E F G H, t1 is now B */
+      splice(a,0,0,t1);    /* a is now B A C D E F G H */
+      t2 = splice(a,4,3);  /* a is now B A C D H, t2 is now E F G */
+      splice(a,1,0,t2);    /* t2 is pasted after B */
+
+    In reality we operate on variable numbers, not names, so final CBOR
+    fragment will look like:
+
+      [
+        ..., /somehow we got A B C D E F G H in var 0 at this point/
+	'!', [0, 1, 1], 1,
+	'!', [0, 1, 1, 1], null,
+	'!', [0, 4, 3], 2,
+	'!', [0, 1, 0, 2], null,
+	...
+      ]
+
+  Example 2:
+
+    Let's have A B C D in variable 0 and "foo" "bar" "baz" in variable 1.
+    Then:
+
+      [
+        ...,
+	'!', [0, 1, 2, "Hello", 1, "world"], null
+	...
+      ]
+
+    sets variable 0 to ["A","Hello", "foo", "bar", "baz", "world", "D"]
+
+TBD 04.02.25 stack machine with 'pushmark'? so just one form of dict setup and
+CBAR-rump being always last?  30 bytes in example 1 vs 27 bytes of:
+  [..., '(',0,0, '(',0,1,1,'!', '!', '(',0,1,0, '(',0,4,3,'!', '!', ...]
+
 
   ### Function '#' - fill() array with null's
 
@@ -1708,11 +1753,12 @@ TODO
 
     variable 0 now has contents ["A","B"].
 
-  Example 2:
+  Example 2 (note it is invalid due to numbers - for easy counting and
+  illustration to fit page width):
 
       ['!', [0,0,0, 1,2,3], '#', 0, 10, '!', [0,10,0,5,6,7], null, ...]
 
-    first slice() setups array 0 to be [1,2,3], then fill() makes it 11
+    first splice() setups array 0 to be [1,2,3], then fill() makes it 11
     elements long, second splice() inserts 3 elements at index 10, so finally
     variable 0 has contents:
 
@@ -1736,6 +1782,9 @@ TODO
 
 	       DICT-REF here MUST NOT refer to CBAR scope stack, only user
 	       values are allowed.
+
+	       If argument is tagged with Tag 10, then value of corresponding
+	       atom is substituted to obtain actual argument.
 
   Example:
 
@@ -1963,12 +2012,88 @@ have been 7 bytes - tag omitted.
 TODO NB! requires standardizing that #6.10(#6.63(uint)) inside array "splice"
 elements of sequence into it, so array size grows and differs from original;
 also MUST prohibit such usage outside of arrays!
+- 02.02.25 problem of #6.10(#6.63(bstr)) in atoms definition - it does not
+  expand to sequence (of atoms) here, it's intended (currently) be still
+  bytestring! need to clarify
 
+TBD 03.02.25 what about "macro" function (for DNS generalizing): just
+substitute a sequence of functions from known place to shorten dictionary
+setup - do it need arguments? mb look at Template::Toolkit?
 
+TBD 04.02.25 where in https://www.w3.org/TR/json-ld/ for nested
+contexts? example 47 ?
+TBD 05.02.25 composability: stack of dictionaries? like x87 or register window?
+- no, just stack frames, negative (-1-N) refers to upper frame's dictionaries
+  - need for splice() to be read only on them, then
+  - no point in "no cut - copy only" splice() on usual dict - for compression
+    atoms shouldn't repeat
+- 06.02.25 be that number 128*level+dict (7 low bits) for >1 stack frame
+- 06.02.25 allow splice() on argument stack itself! false/true for cut/copy
+  (readonly or not)
+- 06.02.25 allow array for argument list as it it is 1 byte for <24 than '('?
+  - or make mark null/undefined?
+- 06.02.25 simple(0)..simple(19) could be used instead of h'80'..h'93' with
+  note that this meaning only in dictionary setup array but not below it, e.g.
+  application's simple(0) will have meaing of that application
+- 06.02 need #6.10(#6.122(uint)) on arguments to import() and store() - to
+  pass from client to server dictionary URL only one time in dictionary 1,
+  then query if server has them and uploading with store() if not
+- 07.02 03:00 we can add some flow control without complex stack, e.g.
+  "foreach" can take two arrays as arguments, `list` and `body`:
+
+  [..., ["www", "example", "org"], [cmdX, cmdY, cmdZ], 'foreach', ...]
+
+  and in simplest implementation splice()'s command list to be
+
+  [..., "www", cmdX, cmdY, cmdZ,
+        "example", cmdX, cmdY, cmdZ,
+	"org", cmdX, cmdY, cmdZ,
+   ...]
+
+   of course, implementations are free to apply whatever optimizations they
+   want to avoid allocating too much memory, e.g. make it real loop with
+   a counter (however this may become complex on nested constructs)
+
+   for one label set:
+
+   "",
+   [/foreach body on "org"/      /S: "" "org"/
+     'ts',                       /S: "" #3.3("org") - convert to tstr        /
+     'swap'                      /S: #3.3("org") ""                          /
+     '.',                        /S: #3.3("org") - concatenated              /
+     'dup',                      /S: #3.3("org") #3.3("org")                 /
+     '(',                        /S: #3.3("org") #3.3("org") '('             /
+     'swap',                     /S: #3.3("org") '(' #3.3("org")             /
+     0, 'swap',                  /S: #3.3("org") '(' 0 #3.3("org")           /
+     'unshift',                  /S: #3.3("org") dict[0][0]: #3.3("org")     /
+   ],
+   [/foreach body on "example"/  /S: #3.3("org") "example"                   /
+     'ts',                       /S: #3.3("org") #3.7("example") - to tstr   /
+     'swap',                     /S: #3.7("example") #3.3("org")             /
+     '.',                        /S: <#3.7("example")#3.3("org")> - concated /
+     'dup',                      /S: <gexamplecorg> <gexamplecorg>           /
+     '(',                        /S: <gexamplecorg> <gexamplecorg> '('       /
+     'swap',                     /S: <gexamplecorg> '(' <gexamplecorg>       /
+     0, 'swap',                  /S: <gexamplecorg> '(' 0 <gexamplecorg>     /
+     'unshift',                  /S: <gexamplecorg> dict[0][0]: <gexamplecorg>/
+   ],                            /                  dict[0][1]: #3.3("org")  /
+   [.../same on "www" leads to <cwwwgexamplecorg> in stack & dict[0][0] / ],
+
+TBD 07.02 05:35 if make push/unshift only one arg, then possible to eliminate
+'swap', 0, 'swap'
+- inside macro it is not a real problem...
+
+TBD 07.02 05:40 need to modify prog above for:
+1) independent domains - currently it always shifts to zero
+2) for <3: "svc", Atom 0> - where to expand atoms?
+* '(', cond, [then], ?[else]?, 'if'   ...or distinct 'if'/'ifelse' so no '(' ?
+* 'is_single_atom' ('?'+h'1A') - if arg consists solely of one atom
 
 TODO
 
 https://github.com/nuclight/musctp/blob/main/cbar.txt
+
+=== 20.01.25 commentary on IETF CBOR Interim meetings:
 
 https://youtu.be/ktfH2jfU7ik?t=1822 : tag ranges on this slide (about "idiom")
 are occupying just a small fraction of corresponding range X+Y range - but
