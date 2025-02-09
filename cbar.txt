@@ -1180,26 +1180,38 @@ TODO 23.01.25 #6.10(24(uint)) must expand to complete CBOR item
   FB             - Atom 8
   FC <VarUInt30> - Copy N Literal bytes, N MUST be greater than 1
   FD <VarUInt30> - Decompress (dispense) atom N
-  FE             - Escape next byte (Copy 1 literal byte)
+  FE byte/VInt21 - Escape next byte (Copy 1 literal byte) or Extended functions
   FF             - Copy remaining_bytes literal bytes
   any other byte - Output this byte
 
-FIXME need Extended functions for Alternatives here!
+  FE code is special: if next byte following has value 0xC0 or more, then it
+  is escape - argument is exactly this byte, which is just escaped, or, in
+  other words, it is shorter version of FC 01 <escaped_byte>. Otherwise, if
+  value is less than 0xC0, then it is treated as VarUInt30 Extended functions
+  (see section about them below). However, due to format of VarUInt30, if it's
+  first byte is less than 0xC0, then value is limited to 21 bits. Therefore,
+  any Extended function MUST have number less than 2097152.
+
+TBD this hard to deal with remaining_bytes, forbid? discuss in section below
 
   Any output operation decrements `remaining_bytes` variable by the size of
   chunk output, and in well-formed input it MUST not became less than zero.
   If `remaining_bytes` became zero (0), state is changed to IN_CBOR.
 
-  Rationale: UTF-8 since updated RFC can't encode codepoints higher than
+  Rationale: UTF-8 since it's updated RFC can't encode codepoints higher than
              0x10FFFF, thus bytes higher than 0xF5 can't appear in well-fromed
 	     UTF-8, and 0xC0 and 0xC1 also must not appear in conforming
 	     UTF-8, thus these bytes could be used inside CBOR Major Type 3
-	     (string) without escaping, as atoms often will be part of text
+	     (string) without escaping(*), as atoms often will be part of text
 	     strings, not only binary. For applications wanting to trade-off
 	     performance to compression ratio, every other byte means itself
 	     which allows to scan contents of text string byte-by-byte, saving
 	     few bytes - instead, for performance of decoder, FC code with
 	     length should be used, allowing to skip to next code.
+
+	     (*) This, of course, means not raw CBOR text strings (where such
+	     bytes are prohibited) but substrings of CBAR which will become
+	     valid CBOR data items after atom substitutions.
 
   Opcodes of IN_CBOR state, with <arguments> (and (mnemonics)):
 
@@ -1300,11 +1312,21 @@ FIXME need Extended functions for Alternatives here!
 
   Dictionary is set up as follows.
 
-  If an atom is simple CBOR element or structured construct (e.g. map), then
-  it's content is not processed, just used as-is: e.g. map encoding including
-  child key-value pairs), or 9 bytes for double-size floating point value
-  (0xfb and 8 bytes of IEEE 754). If an atom is of Major Type 2 or 3, then
-  only contents of this string is used, e.g. 63 666F6 for "foo" will result
+  If an atom is simple (types 0, 1, 7) CBOR element or structured construct
+  (Major Type 4 or 5, e.g. map), then it's content is NOT processed, just used
+  as-is: e.g. map encoding including child key-value pairs), or 9 bytes for
+  double-size floating point value (0xfb and 8 bytes of IEEE 754). Note that,
+  in order to support constrained implementations or implementations above
+  a generic encoder/decoder, keeping exact serialization (in addition to
+  parsed CBOR tree) can be memory-consuming or impossible to obtain. Thus, as
+  possible re-encoding to CBOR, while retaining semantics, may lead to
+  different chunk of bytes (e.g. order of map keys or float vs double), it
+  SHOULD NOT be relied upon in applications requiring checksums or
+  cryptographic signatures (some out-of-band negotiation of whether encoding
+  is deterministic may be needed).
+
+  If an atom is of Major Type 2 or 3, then only contents of this string is
+  used, e.g. 4 hex bytes 63 666F6 of CBOR text string "foo" will result
   in 3-byte atom 666F6. However if an atom is bstr (Major Type 2) with tag
   #6.10, then it's contents processed (and expanded value then used) by the
   same CBAR unpacking process - but decoder start state is IN_BLOB (instead of
@@ -1331,6 +1353,58 @@ FIXME need Extended functions for Alternatives here!
   structural CBOR elements, inside binary string these extended functions just
   switch dictionaries without keeping state - and tags do "push" and "pop" on
   stack levels.
+
+TBD 07.02.25 think about unification of them with stack machine for atoms, to
+use not only for packing (where only static atom substitution enough) but also
+as general templating mechanism, e.g. generating arrays with [% FOREACH %]
+- 08.02 05:26 `{vars} {body} 'foreach'` in Tcl speak - yeah, we already have
+  FC for {$this} ! so define one extended function, which MUST be followed by
+  literal copy, which will push this literal to stack, instead of default
+  "output" action, and another - for other arguments... may be also FC with
+  CBOR Sequence in it of those like in atoms dict setup?
+  - 05:35 but if Extended Functions have same codes as tstr commands, why not
+    just use them? only one CBOR item as argument?
+    - no, it will clash with (constrained) parsers who don't support this
+      particular function, escape is a must
+    - isn't literal copy above a form of CBOR bstr push like in dict setup?
+      - no, they parsed differently: CBAR bstr consists of CBOR element's byte
+	sequences whose action is roughly "immediately output()" (or append to
+	argument stack both bstr and output() function for it)
+	- 21:35 why "immediately output()" after each? it may be single
+	  implicit output() at the end for whatever arguments are; then FC
+	  just adds to S (just as usual IN_CBOR elements) and corresponding
+	  FE now may be after it, not before
+	  - then it will be hard in foreach() as it pushed arg before body?
+      - 09.02 00:57 we just need a way to at least *somewhat* resemble
+	Template::Toolkit with it's substs in text instead of manual bunch of
+	print()s, so let it be 'tp' ('template_parse') function (also
+	implicitly applied to CBAR-rump initially) which converts our format
+	to sequence of [..., literal, 'output', arg, 'func', literal, 'output']
+	by splice()ing it (just like if/foreach), so body of 'foreach' now may
+	be simplified to [..., commands, 'bstr-template-body', 'tp', ...] or
+	several ones, but at least not for every individual element
+	- 03:50 CBOR's bstr ai/length bytes and then 'tp' occupy space... for
+	  common case where only one at end may provide FE code so that CBOR
+	  ends with FF, rest of length is known (we are in FC), so that tail
+	  is automatically conversed to bstr plut 'tp'
+    - 05:56 how to marry this with `remaining_bytes` variable...
+      - just forbid it for IN_BLOB? but then how to template BLOBs...
+      - 07:00 variable needed only to switch parser states - so mb other tool
+	in such case; also foreach-like templating is generally used outside
+	of bstr's (structural: for maps and arrays), but even if it is, then
+	for dynamic content it's also hard to predict enclosing CBOR's string
+	length (it generating by template case, not packing existing CBOR) -
+	and we cannot return back and set string length after all loops... the
+	solution here is probably to prepare temporary atom before and then
+	issue 5C/7C (probably surrounded by dictionary switches) to convert
+	it to final string
+	- 09.02 01:30 if we going to support delta-encoding like in YACTS/VTS or
+	  SenML, then probably also need 1C/3C to be "convert to CBOR int"
+	  (not atoms)
+    - 22:09 define tstr/bstr codes to be looking same bytes in hexdump
+      * 10000001 bbbbbbbb          - that is, 256..511
+      * 10100010 bbbbbbbb cccccccc - 131073..+65535
+      and low bits of first byte like additional info in tstr/bstr 1/2 bytes
 
   ### Examples
 
@@ -1674,9 +1748,9 @@ TODO atoms length < 3 prohibited -> integers < 256 to splice are array numbers
                a LENGTH was provided, decoder SHOULD issue a warning, and
 	       splices at the end of the array.
 
-               The following equivalences hold (assuming "length(a) > i" )
+               The following equivalences hold (assuming "llength(a) > i" )
 
-                   push(a,x,y)         splice(a,length(a),0,x,y)
+                   push(a,x,y)         splice(a,llength(a),0,x,y)
                    pop(a)              splice(a,-1)
                    shift(a)            splice(a,0,1)
                    unshift(a,x,y)      splice(a,0,0,x,y)
@@ -2035,6 +2109,18 @@ TBD 05.02.25 composability: stack of dictionaries? like x87 or register window?
 - 06.02.25 simple(0)..simple(19) could be used instead of h'80'..h'93' with
   note that this meaning only in dictionary setup array but not below it, e.g.
   application's simple(0) will have meaing of that application
+  - 08.02 15:09 use only simple(0..6) to match Alternatives tags, others for
+    most used functions, and make them abbreviations/macros: e.g. simple(1) as
+    assignment to dict 1 is it's clearing and then using arguments:
+    '(', '(', 1, 0, 1,'llength', 'splice', ')'
+    - incorrect prog, offset/length must be before our list on stack...
+      - need function 'unshift_arg' to move top-of-stack (including '(') right
+        after '(', so:
+        1, 'llength', 'ua', 0, 'ua', 1, 'ua', '(', 'ua', 'splice'
+    - allow some simple(N) be defined by tag/media type, e.g. for DNS, and it
+      can be just 'tag:ietf.org,2025-02:lenders/dns-cbor', 'mr' ("macro run")...
+      - and may be [number/letter, +commands], 'md' for macro define?
+        - this requires storage for macros... optional fo constrained?
 - 06.02 need #6.10(#6.122(uint)) on arguments to import() and store() - to
   pass from client to server dictionary URL only one time in dictionary 1,
   then query if server has them and uploading with store() if not
@@ -2089,6 +2175,76 @@ TBD 07.02 05:40 need to modify prog above for:
 * '(', cond, [then], ?[else]?, 'if'   ...or distinct 'if'/'ifelse' so no '(' ?
 * 'is_single_atom' ('?'+h'1A') - if arg consists solely of one atom
 
+   [/inner foreach body on "svc" or Atom 0/
+     'dup',
+     'is_single_atom',
+     [/true/
+       /do nothing - just leave tail atom on stack, will be concatenated     /
+       /with next element on next iteration TBD non-tail atom or malformed?  /
+     ],
+     [/else/
+       'ts',                     /S: #3.3("org") #3.7("example") - to tstr   /
+       'swap',                   /S: #3.7("example") #3.3("org")             /
+       '.',                      /S: <#3.7("example")#3.3("org")> - concated /
+       'dup',                    /S: <gexamplecorg> <gexamplecorg>           /
+       '(',                      /S: <gexamplecorg> <gexamplecorg> '('       /
+       'swap',                   /S: <gexamplecorg> '(' <gexamplecorg>       /
+       1, 'swap',                /S: <gexamplecorg> '(' 1 <gexamplecorg>     /
+       'unshift',                /S: <gexamplecorg> dict[1][0]: <gexamplecorg>/
+     ],
+     'ifelse'
+   ],
+
+
+TBD 07.02.25 call rump "template" and make it, as well as certain arguments in
+dict setup, be also compressible/references to external values - like
+import()/store() and macro arguments (see notes of previous day); see also
+[Yet Another Compact Time Series Data Representation Using CBOR Templates (YACTS)](https://imt-atlantique.hal.science/hal-04592891/document)
+- theirs "context in the metadata" is essentially application-defined
+  dictionary in CBAR e.g. with integer, for import() - so overriding by theirs
+  "specific metadata" is CBAR's splice() to that dictionary with message-local
+  atoms, e.g. their map {0:1 , 1: 1593982800 , 2:10 , 3:3}
+  could be represented by A4 (map of 4) and four atoms following, each having
+  key:value sequence; and this allows - more readable than integers - string
+  keys - so CBAR is more human-friendly after unpacking
+- so overall, the only their addition which can be generalized - is variable
+  number of similar entries - something like [% FOREACH %] in template itself,
+  e.g. $tt->process($tpl, $vars, $out) - my notes above were $vars only
+- BTW, their "5.2. Tree Formatting" with `TAGN(v1, v2, ..., vn)` locating in
+  nested arrays is similar to muSCTP's "sesctl" for which CBAR was born
+  and to Tcl's `lindex` command
+  - general template processing may benefit from unlimited variable tree, in
+    contrast to current "128 dictionaries, each is just array", but that
+    contradicts to packing (shortest atom representation) and simplicity
+    - 08.02.25 22:20 if an element in stack is array, make `lindex` accessor
+      for it in Extended Functions? in usual too? if others like `lappend`
+      then this intersects with splice()...
+    - 09.02 02:04 what if restrict VarUInt30 ? for FD it's already VInt21, let
+      it be same until 2^21 and then - number of bytes following minus 2 (65
+      max), which are list of 21-bit integers:
+      0....... - 7 bits
+      10...... - 14 bits
+      110..... - 21 bits
+      so this list can be used in FD, 7C etc. where atom number is needed
+      - but for FC still leave it VarUInt30 ? 2 megabytes is not that much, in
+        contrast to atom sizes which may require dozens of bytes per entry of
+        overhead...
+      - 09.02 02:40 now allow [index1, ...] as array name to splice() etc. and
+        we are done! just as we did above for "example.org", prepare this tree
+        from current iterator value on stack and then just with 'tp'... the
+        only question now is scope/living time - when/how autodestrot them?
+        - 02:49 add a bool to indexes array if splice() allowed to cut?
+        - 03:26 simple: when [...] is splice()d to program, it is surrounded
+          automatically by unshift() on enter and shift() on exit with
+          discarding result; in atom indexes paths this is ..0, N for current
+          scope, ..1, N for parent and so on; now only top index should be
+          choisen for this for these "local variables"
+	  - may be just directly 0..120 ? complicates handling (to not disturb
+	    121+) compared to plain shift/unshift but saves one byte in each
+	    access (e.g. 7C C1 00 nn)
+      - standard atoms in 128 dictionaries also can be accessed by indexes
+        121..127 etc. as with Alternatives Tags so this can be cheaper than
+        switch dictionaries back and forth
 TODO
 
 https://github.com/nuclight/musctp/blob/main/cbar.txt
