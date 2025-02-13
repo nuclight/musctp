@@ -7305,6 +7305,29 @@ as ranges in byte?
  11aa bbbb cccc                           - 10
 
 TBD 11xxbbbbcccc - 768 from 10 bits
+
+TBD 13.02.25 23:00 https://arxiv.org/pdf/2111.12800 about tiny pointers
+describes a way of storing bitmap/sizes of pointers, the idea of O(log N)
+counts of sizes - may apply this, but VarNibbles array must be sorted for this
+and to restore order permutation requires O(log(N!)) ~= O(N^2) space - too
+much... however this reminds of Burrows–Wheeler and Move-to-front transforms
+- storing a bitmap where each integer starts/ends (just concatenated bitmaps)
+  is no different in space in continuation bit in each nibble (like
+  SDNV/DER/OID for bytes); if represent as digits-with-commas and encode
+  length separate - it's again not different from storing length directly in
+  our VarNibble in overall storage, just gives possibility of non 2^N lengths
+- huh, bzip2 is complex, two RLE steps...
+TBD 14.02.25 01:30 what if instead of length in every integer apply zeroes
+compression? while BWT and MTF may be to complex, RLE may be enough:
+represent as a string of hex digits, convert every 2+ sequence of 0's to
+two nibbles <0 count> or bare 0 if it was just one zero in original, and
+then store additional bitmap: for every 0 in stream, bit 0 if it is bare 0
+and bit 1 if it is followed by count nibble
+* pro: it can also compress zeroes at ends of numbers
+* con: worst case of alternating 0 and non-0 nibbles expands by bit per byte
+  - may be mitigated by a flag in type byte (we anyway need to store length of
+    bitmap) that is not compressed, so this will be better than 12.5% starting
+    from 9 bytes
 ===
 
 bytes?

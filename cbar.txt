@@ -2225,6 +2225,7 @@ import()/store() and macro arguments (see notes of previous day); see also
       0....... - 7 bits
       10...... - 14 bits
       110..... - 21 bits
+      111..... - CBOR Major Type 7, Reserved for future use (like VTS)
       so this list can be used in FD, 7C etc. where atom number is needed
       - but for FC still leave it VarUInt30 ? 2 megabytes is not that much, in
         contrast to atom sizes which may require dozens of bytes per entry of
@@ -2232,7 +2233,7 @@ import()/store() and macro arguments (see notes of previous day); see also
       - 09.02 02:40 now allow [index1, ...] as array name to splice() etc. and
         we are done! just as we did above for "example.org", prepare this tree
         from current iterator value on stack and then just with 'tp'... the
-        only question now is scope/living time - when/how autodestrot them?
+        only question now is scope/living time - when/how autodestroy them?
         - 02:49 add a bool to indexes array if splice() allowed to cut?
         - 03:26 simple: when [...] is splice()d to program, it is surrounded
           automatically by unshift() on enter and shift() on exit with
@@ -2245,6 +2246,35 @@ import()/store() and macro arguments (see notes of previous day); see also
       - standard atoms in 128 dictionaries also can be accessed by indexes
         121..127 etc. as with Alternatives Tags so this can be cheaper than
         switch dictionaries back and forth
+     - 10.02 this introduces three similar but distinct VarInt formats: for
+       FC length, FD (7C, ...) atom number or array of numbers, and FE escape;
+       better to unify (and higher length for FC)
+       - 11.02 03:00 if declare that array can start only from integer, then
+	 escaped byte values may serve as array size, so will be treated
+	 different only by FD (which can't have array), so each element will
+	 be parsed uniform, just first will be special after parsing
+	 - 03:30 but then FC also may have array, meaningless
+	   - why? type of chunk may be put here, instead of separate FE, just
+	     check if it is not longer... and it is, FC al i1 i2 is not
+	     shorter than FC i1 FE i2...
+	     - 04:00 only if we make smth like FC C0 ll like tagged, haha
+	     - not "tagged", just treat as list and interpret differently:
+	       * for usual, special value is index to table how many read more
+               * for FC, it's type and reading only one next element
+	 - 11.02.25 20:30 so let it be:
+             0..159 values coded as themselves                     bits:
+             101aaaaa bbbbbbbb                                     - 13
+	     1100xxxx C0..CF are special codes
+             1101aaaa bbbbbbbb cccccccc                            - 20
+             11100aaa bbbbbbbb cccccccc dddddddd                   - 27
+             111010aa bbbbbbbb cccccccc dddddddd eeeeeeee          - 34
+             11101100 aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee - 40
+             11101101 aaaaaaaa bbbbbbbb cccccccc   ...    ffffffff - 48
+             11101110 aaaaaaaa bbbbbbbb cccccccc   ...    gggggggg - 56
+             11101111 aaaaaaaa bbbbbbbb cccccccc   ...    hhhhhhhh - 64
+	     1111xxxx F0..FF are special codes
+
+
 TODO
 
 https://github.com/nuclight/musctp/blob/main/cbar.txt
