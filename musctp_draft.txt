@@ -7328,6 +7328,33 @@ and bit 1 if it is followed by count nibble
   - may be mitigated by a flag in type byte (we anyway need to store length of
     bitmap) that is not compressed, so this will be better than 12.5% starting
     from 9 bytes
+- 18.02.25 02:15 bitmap may be split "streaming": a bitmap byte, then chunk of
+  nibbles, as 7 zeroes (including count if any) were seen, another bitmap
+  byte, and so on (first bit is flag if compressed, then bitmap, else number
+  of bytes) - this is almost same for decoder but simpler for encoder as
+  there is no need to return to initial bytes which are variable-length (so
+  encoded portion need to be memmove()ed a byte or two), because if after try
+  to encode it's constant size to patch whether compression succeeded or not,
+  and less to re-try, vs entire set
+  - 19.02 00:15 byte is simple, but what if ended not on a byte boundary?
+    issue a padding? make that padding real nibble whatever it be, even
+    non-counted zero? or reduce bitmap/length to nibble itself - 3 zeroes max?
+    - 00:20 then "non-compressed" variant of 8 nibbles has too much overhead,
+      12.5% (though still better than CBOR)
+    - 00:23 padding real nibble even if it is unbitmaped zero looks better,
+      but also need to think about overall padding on stream termination...
+      though simple if we got multiple of integer size unpacked, just ignore
+      leftover
+- 19.02.25 00:34 this scheme is better than all other VarNibbles on values
+  more than byte, but worse than all other VarNibbles and even CBOR on
+  particular datasets like long runs of values in at least 0-7 range: each
+  uint32_t will become '0 <7> val' - that is, 3 nibbles for 1 = 150%!
+  - 01:40 <type> <count> <vals> block, where <count> is of original integers,
+    type is 0 for all-zeroes, 1/2/3 for that size in nibbles
+    type 4..7 - single integer of <type> nibbles
+    type 8,9,a,b - 1..4 full 32-bit uncompressed follow
+    type <11xx xxxx> = bitmap as above, then take N nibbles from stream of
+    "padding" to make it whole number of integers
 ===
 
 bytes?

@@ -1368,39 +1368,57 @@ as general templating mechanism, e.g. generating arrays with [% FOREACH %]
       particular function, escape is a must
     - isn't literal copy above a form of CBOR bstr push like in dict setup?
       - no, they parsed differently: CBAR bstr consists of CBOR element's byte
-	sequences whose action is roughly "immediately output()" (or append to
-	argument stack both bstr and output() function for it)
-	- 21:35 why "immediately output()" after each? it may be single
-	  implicit output() at the end for whatever arguments are; then FC
-	  just adds to S (just as usual IN_CBOR elements) and corresponding
-	  FE now may be after it, not before
-	  - then it will be hard in foreach() as it pushed arg before body?
+        sequences whose action is roughly "immediately output()" (or append to
+        argument stack both bstr and output() function for it)
+        - 21:35 why "immediately output()" after each? it may be single
+          implicit output() at the end for whatever arguments are; then FC
+          just adds to S (just as usual IN_CBOR elements) and corresponding
+          FE now may be after it, not before
+          - then it will be hard in foreach() as it pushed arg before body?
+            - 18.02.25 (see also this day) mb workable with different forms of
+              foreach() e.g. with variables instead of stack? as previous was
+              noted before TAGN() and typed FC support
+              - 23:24 stack was for DNS: so that body may be appended to list
+                by macro; as it is macro anyway, solvable by arg before body
+                which is null if just stack and count if there are more
+                vars/list pairs
+                - 23:30 may be a supplement command to '(' which will convert
+                  to number of arguments?
+                - 23:30 add functions 'reverse' (of list) for looping down to,
+                  and creating range from list before it on stack, so
+                  foreach() could receive two lists, main and "i++" for
+                  checking number TBD what for '.first()/.last()' ? sublist?
+          - 23.02 Rivet/minirivet also converts to outputCommand, it's just
+            that *execution* of this command need not be immediate (or it will
+            break flow control), but with stack machine such code generation
+            is probably harder to achieve than in prefix, and surely harder to
+            manually write binary template than in traditional style
       - 09.02 00:57 we just need a way to at least *somewhat* resemble
-	Template::Toolkit with it's substs in text instead of manual bunch of
-	print()s, so let it be 'tp' ('template_parse') function (also
-	implicitly applied to CBAR-rump initially) which converts our format
-	to sequence of [..., literal, 'output', arg, 'func', literal, 'output']
-	by splice()ing it (just like if/foreach), so body of 'foreach' now may
-	be simplified to [..., commands, 'bstr-template-body', 'tp', ...] or
-	several ones, but at least not for every individual element
-	- 03:50 CBOR's bstr ai/length bytes and then 'tp' occupy space... for
-	  common case where only one at end may provide FE code so that CBOR
-	  ends with FF, rest of length is known (we are in FC), so that tail
-	  is automatically conversed to bstr plut 'tp'
+        Template::Toolkit with it's substs in text instead of manual bunch of
+        print()s, so let it be 'tp' ('template_parse') function (also
+        implicitly applied to CBAR-rump initially) which converts our format
+        to sequence of [..., literal, 'output', arg, 'func', literal, 'output']
+        by splice()ing it (just like if/foreach), so body of 'foreach' now may
+        be simplified to [..., commands, 'bstr-template-body', 'tp', ...] or
+        several ones, but at least not for every individual element
+        - 03:50 CBOR's bstr ai/length bytes and then 'tp' occupy space... for
+          common case where only one at end may provide FE code so that CBOR
+          ends with FF, rest of length is known (we are in FC), so that tail
+          is automatically conversed to bstr plus 'tp'
     - 05:56 how to marry this with `remaining_bytes` variable...
       - just forbid it for IN_BLOB? but then how to template BLOBs...
       - 07:00 variable needed only to switch parser states - so mb other tool
-	in such case; also foreach-like templating is generally used outside
-	of bstr's (structural: for maps and arrays), but even if it is, then
-	for dynamic content it's also hard to predict enclosing CBOR's string
-	length (it generating by template case, not packing existing CBOR) -
-	and we cannot return back and set string length after all loops... the
-	solution here is probably to prepare temporary atom before and then
-	issue 5C/7C (probably surrounded by dictionary switches) to convert
-	it to final string
-	- 09.02 01:30 if we going to support delta-encoding like in YACTS/VTS or
-	  SenML, then probably also need 1C/3C to be "convert to CBOR int"
-	  (not atoms)
+        in such case; also foreach-like templating is generally used outside
+        of bstr's (structural: for maps and arrays), but even if it is, then
+        for dynamic content it's also hard to predict enclosing CBOR's string
+        length (it generating by template case, not packing existing CBOR) -
+        and we cannot return back and set string length after all loops... the
+        solution here is probably to prepare temporary atom before and then
+        issue 5C/7C (probably surrounded by dictionary switches) to convert
+        it to final string
+        - 09.02 01:30 if we going to support delta-encoding like in YACTS/VTS or
+          SenML, then probably also need 1C/3C to be "convert to CBOR int"
+          (not atoms)
     - 22:09 define tstr/bstr codes to be looking same bytes in hexdump
       * 10000001 bbbbbbbb          - that is, 256..511
       * 10100010 bbbbbbbb cccccccc - 131073..+65535
@@ -2120,10 +2138,13 @@ TBD 05.02.25 composability: stack of dictionaries? like x87 or register window?
     - allow some simple(N) be defined by tag/media type, e.g. for DNS, and it
       can be just 'tag:ietf.org,2025-02:lenders/dns-cbor', 'mr' ("macro run")...
       - and may be [number/letter, +commands], 'md' for macro define?
-        - this requires storage for macros... optional fo constrained?
+        - this requires storage for macros... optional for constrained?
 - 06.02 need #6.10(#6.122(uint)) on arguments to import() and store() - to
   pass from client to server dictionary URL only one time in dictionary 1,
   then query if server has them and uploading with store() if not
+  - see 15-18.02.25 for alternatives '$'/'@'/unwrap() then 'ld'; we'd better
+    limit use of #6.10, especially in combinations, to pure CBOR, not in
+    commands
 - 07.02 03:00 we can add some flow control without complex stack, e.g.
   "foreach" can take two arrays as arguments, `list` and `body`:
 
@@ -2168,10 +2189,13 @@ TBD 05.02.25 composability: stack of dictionaries? like x87 or register window?
 TBD 07.02 05:35 if make push/unshift only one arg, then possible to eliminate
 'swap', 0, 'swap'
 - inside macro it is not a real problem...
+- 18.02.25 here assumed that <<0, 'unshift'>> operates on dictionary 0, but in
+  variable tree that would be 121 - should we fix it? in macro growing of size
+  is not a problem, but "path" vs ["path"] is to be thought
 
 TBD 07.02 05:40 need to modify prog above for:
 1) independent domains - currently it always shifts to zero
-2) for <3: "svc", Atom 0> - where to expand atoms?
+2) for <3: "svc", Atom 0> - when/where to expand atoms?
 * '(', cond, [then], ?[else]?, 'if'   ...or distinct 'if'/'ifelse' so no '(' ?
 * 'is_single_atom' ('?'+h'1A') - if arg consists solely of one atom
 
@@ -2240,9 +2264,9 @@ import()/store() and macro arguments (see notes of previous day); see also
           discarding result; in atom indexes paths this is ..0, N for current
           scope, ..1, N for parent and so on; now only top index should be
           choisen for this for these "local variables"
-	  - may be just directly 0..120 ? complicates handling (to not disturb
-	    121+) compared to plain shift/unshift but saves one byte in each
-	    access (e.g. 7C C1 00 nn)
+          - may be just directly 0..120 ? complicates handling (to not disturb
+            121+) compared to plain shift/unshift but saves one byte in each
+            access (e.g. 7C C1 00 nn)
       - standard atoms in 128 dictionaries also can be accessed by indexes
         121..127 etc. as with Alternatives Tags so this can be cheaper than
         switch dictionaries back and forth
@@ -2250,21 +2274,21 @@ import()/store() and macro arguments (see notes of previous day); see also
        FC length, FD (7C, ...) atom number or array of numbers, and FE escape;
        better to unify (and higher length for FC)
        - 11.02 03:00 if declare that array can start only from integer, then
-	 escaped byte values may serve as array size, so will be treated
-	 different only by FD (which can't have array), so each element will
-	 be parsed uniform, just first will be special after parsing
-	 - 03:30 but then FC also may have array, meaningless
-	   - why? type of chunk may be put here, instead of separate FE, just
-	     check if it is not longer... and it is, FC al i1 i2 is not
-	     shorter than FC i1 FE i2...
-	     - 04:00 only if we make smth like FC C0 ll like tagged, haha
-	     - not "tagged", just treat as list and interpret differently:
-	       * for usual, special value is index to table how many read more
+         escaped byte values may serve as array size, so will be treated
+         different only by FD (which can't have array), so each element will
+         be parsed uniform, just first will be special after parsing
+         - 03:30 but then FC also may have array, meaningless
+           - why? type of chunk may be put here, instead of separate FE, just
+             check if it is not longer... and it is, FC al i1 i2 is not
+             shorter than FC i1 FE i2...
+             - 04:00 only if we make smth like FC C0 ll like tagged, haha
+             - not "tagged", just treat as list and interpret differently:
+               * for usual, special value is index to table how many read more
                * for FC, it's type and reading only one next element
-	 - 11.02.25 20:30 so let it be:
+         - 11.02.25 20:30 so let it be:
              0..159 values coded as themselves                     bits:
              101aaaaa bbbbbbbb                                     - 13
-	     1100xxxx C0..CF are special codes
+             1100xxxx C0..CF are special codes
              1101aaaa bbbbbbbb cccccccc                            - 20
              11100aaa bbbbbbbb cccccccc dddddddd                   - 27
              111010aa bbbbbbbb cccccccc dddddddd eeeeeeee          - 34
@@ -2272,7 +2296,390 @@ import()/store() and macro arguments (see notes of previous day); see also
              11101101 aaaaaaaa bbbbbbbb cccccccc   ...    ffffffff - 48
              11101110 aaaaaaaa bbbbbbbb cccccccc   ...    gggggggg - 56
              11101111 aaaaaaaa bbbbbbbb cccccccc   ...    hhhhhhhh - 64
-	     1111xxxx F0..FF are special codes
+             1111xxxx F0..FF are special codes
+    - 15.02.25 need templating for maps, instead of cbor-packed's cancelling
+      entries with key/null's
+      - fill some array in tree with key-value pairs (one per element), define
+        conversion functions to generate CBOR array or CBOR map from in-tree
+        array (count of elements)
+        - need we define opcodes 9C and BC like 7C, or it's waste of atoms?
+          - 22:34 no: as it will be several elements = path in tree (array
+            reference), and CBOR arrays/maps expected to be many bytes in
+            expanded form (in contrast to simple strings), one byte will not
+            save much here
+            - also a rule: single-bytes only for scalar types, so better think
+              of 1C/3C ?..
+          - may be standard FD but with a Special Value in Path Array as
+            a convert function?
+        - 22:56 need a construct like:
+          @array = @array[1,4..6,0], @another_array, @array[2,3,7];
+          - see below at 02:50 for ']'
+        - 23:28 also, need we @$% in CBOR arguments for referencing Path Array
+          (path in variable tree) so need tags for this - to distinguish from
+          literal CBOR items in e.g. list for foreach() ?
+          - 23:34 tags 64-71 can be for path array... but what if those are
+            used by target application (after expand) too
+            - 23:39 look at Tcl's [] and $ ?
+            - 23:43 a 10(h'FD path') ? raises question of when to expand atoms
+          - 16.02 01:30 no, functions '@' and '$' may be used to substitute;
+            so need other mnemonic for import() and probably two distinct
+            funcs: '@' for just list (splice) and '[@' (?) for wrapping as
+            array (CBOR)
+            - 02:50 wrapping probably better done by '[', ..., ']' (or '(' ?)
+              and have '@[' for subscripts ranges? so example at 22:56 above:
+              ..., '(',
+                        [path,to,array], [1,[4,6],0], '@[',
+                        [path,to,another_array], '@',
+                        [path,to,array], [2,3,7], '@[',
+                ']', 'splice' ... # TODO proper assignment
+            - 05:50 is '$' same as `lindex()` ?
+            - 18.02.25 20:20 a [..., 2, '$', 'ld', ...] could be used for
+              loading dictionary with long string name which was pushed for us
+              to Atom number 2 externally e.g. by media type, or [path,to,var]
+              instead of Atom - e.g. [1,2] as first var in upper stack frame
+            - 18.02.25 22:56 BTW nothing prevents argument to 'ld' be compound
+              CBOR type, e.g. an array [db_name, table_name, rowid]
+- 16.02.25 05:35 for reference, generalize #6.10([+ commands, template]) to
+  just commands: they must leave exactly one value on (stack) S, which will be
+  then examined if it is to be parsed as CBOR or bstr template (and in latter
+  case continued by output() and so on) - so usual commands may dereference
+  some external value just as they would do for import() dictionaries and
+  leave it's fetched contents as single value on stack
+  - so import() becomes lower-level than dealing with dictionary number to put
+    into - it just downloads and puts contents on stack, and some other
+    function must then put such array into specified dictionary (and expand
+    atoms, etc.)... so use h'01' code with mnemonics as CoAP 0.01 "GET" ?
+    reserve 0.02 for POST ? or better rename to fetch() as it is not only URL
+    but e.g. aplication defined number 12345678 ?
+    - 06:30 need unwrap() function to push contents of such imported array on
+      stack to later be put into dictionary?
+    - 17.02.25 call it load() 'ld' to match with store() and to load generic
+      CBOR documents: be it dictionary, or macro, etc.
+- 18.02.25 16:00 in Tcl `foreach` supports multiple variables and multiple
+  lists in parallel, might be handy for templates like VTS or SenML or even
+  MyLED example, but need to think what goes to argument stack S and what in
+  variable (scope) stack
+  - 18.02.25 23:24 possible solution at this timestamp above
+  - 18.02.25 23:38 while 'continue' ('next') can be emulated by 'ifelse' with
+    one branch empty, 'break' ('last') is not so if implemented by splice()ing
+    several times into program itself... so postulate [+cmds] is child program
+    with variable's stack frame? so it will also be simple to push/pop stack
+    frames (no "implicitly add splice()s to prog") and to make e.g. built-in
+    counters for loops
+- 20.02.25 19:00 what if instead of stack make it entirely Tcl-like? e.g. it
+  would be single unified #6.10([+commands]) as `[command substitution]`
+  whenever it seen, returning result of (last) command, no separate
+  "dictionary setup" or so, and `{script string}` is just `[cbor, array]`
+  without tag (command like 'if' will use it if want)... greatly simplifies
+  implementation, just need to find analog of `{*}`/`@{`/etc. and $variable
+  dereference... though not much different from stack or Lisp here
+  - the main reason of stack machine is compactness: we are packing, so
+    10([2,'$','ld',simple(0),rump]) or 10([atom1,...,atomN,simple(0),rump])
+    is quite compact - in contrast to Tag 10 plus array starter byte overhead
+    for *every* function... and chaining requires nothing in Forth but at
+    least ';' between commands in [same script]
+    - however, the Stack compactness is not that obvious in complex cases
+      where '(' and 'unshift_arg' are needed - need to write some real
+      programs to compare, and see what is more often/rarely used
+  - 21.02.25 15:35 looks like compactness may be solvable if:
+    1) make some commands prefixes of execution of next command, like
+      'nice cmd args...' in Shell,
+    2) declare that some arguments are not arguments but rather commands with
+       fixed number of arguments, e.g. 'ld' or '+' (however for '+' that may
+       be relaxed for any number of args if in first (=command name) position)
+       parsed and substituted as they are read, that is, equivalent of placing
+       a call 10([fixed, number]) in it's place - after all, Tcl is not Lisp
+       and also has some syntax beyond just quotes/braces/brackets... so can
+       10([simple(0), 'ld', '$', 2, rump]) now with same efficiency
+       - 16:10 hmm, this example has nesting, so it's either scanning from end
+         of array or "inserting bytes CA 81" into CBOR representation before
+         such command and then re-parsing CBOR?..
+         - 23.02 will need to mark value in implementation somehow to prevent
+           infinite recursion
+       - extensibility: h'nA BC' for unknown commands with N arguments?
+         - 16:26 why unknown, that's shall bail out? known, but optimized
+           - if we are going to use macro names or 'proc', may be unknown at
+             time of parsing: will be loaded from external when executed
+       - 18:22 a tag to escape commands like '\' when short strings needed for
+         e.g. concat() ? a generic escape 10(['process-cbor', 'ld']) could be
+         too long
+       - 22.02 18:30 a tag (1+1) won't be shorter than just special "\" cmd
+         - 27.02 23:00 but simple(12) can (^\=0x1c, let's -0x10)
+       - 23.02 there is problem with commands short by nature: 'if', 'do'...
+         - 14:24 tag 21334? tstr vs bstr?
+           - changing to text makes it too easy for human error, but still
+             should reserve 110xxxxx 10xxxxxx to be NOT used in bstr
+         - 15:00 provide command ['parse-alias', original, count, short-form]
+           so that only those in list will be considered on parsing and only
+           '\' and ';' will be unchangeable
+           - what to do if there are too many of them? some pattern?
+           - or name it 'keyword'? 'keysyllable'? 'flatten'? 'parse-syllable'?
+             - 08.03.25 23:00 make parse-alias working only on non-first
+               member, so e.g. '+' may have any number of arguments in first
+               position and just two when flattened in arguments
+               - 23:10 problem of such aliases in bodies of 'if', 'foreach'
+                 etc. where there is no Tag 10 - either this should work
+                 everywhere or be expicitly marked by e.g. 'process-cbor'?
+         - 16:00 what to do if '\' in scope of flattened form?
+           - similar to ['ld', '$', var] problem: '$' must be unflattened first
+    3) 23.02 01:40 Jim Tcl has [alias name args...] e.g.
+       `alias e info exists; if {[e var]} { ...`
+  - how to code recursion of scripts efficiently? in stack machine it's very
+    simple... however, some recursion in decoder is inevitable due to e.g.
+    #6.10(#6.121({"nested": ["dictionary", "scope"]}))
+  - 22.02.25 03:00 what if #6.10(uint) inside program is current stack frame's
+    local variable reference - that is, $localvar? is it generalizable with
+    same meaning for atoms in plain CBOR / inside Alternatives Tag, as e.g.
+    `with ...` or `(let (...))`?
+    - this is OK for single atom as variable, but for global Path Array in
+      variable tree, which is like $var::in::namespace, such name will be
+      [cbor, array] and Tag 10 on array already means "execute it" in this
+      paradigm... also not quite good if deferred atoms evaluation will be
+      chosen: when/where to expand - simple dictionary setup will want to
+      first collect arguments of #6.10(bstr) form and then process them in
+      a foreach loop
+
+TBD 17.02.25 all in-CBOR tags applications should be defined in terms of
+applying (elementary) (stack) functions, e.g. #6.10(24(bstr)) as something
+like [bstr, 'expand_CBAR', 'parse_cbor_from_bstr'] program
+
+TBD 23.02.25 01:40 looking at Jim Tcl, it has "args" to [proc] not only at
+end, and some other commands are also usable, e.g. [range], [loop]; in sources
+it has Jim_EvalFrame for everything (e.g. body of [foreach] which executed by
+Jim_EvalObj on C stack) and Jim_CallFrame for [proc]'s, having variables - do
+we need only the latter to be explicitly available?
+- 03:00 if we have #6.10(#6.121(...)) equivalent to #6.10([commands, CBOR]),
+  then to access variables upper in CBOR (see notes at 05.02.25 and 06.02
+  for -1-128*level+dict) still need this as eval frames?.. also a clash
+  between atom numbers and $variable numbers in execution code, and also
+  numbers to separate argument variables from local variables? may be to
+  different array in stack, but that means always '$' [path, array] which is
+  longer
+  - 03:50 make different commands, e.g. 'a' to get atom instead of '$' ? and
+    'l' for local vars; in fact, "in addition" (not instead) to '$' which
+    still able to access everything by path... BTW this somewhat parallels FD
+    code in template which can be either plain number for atom, or path array
+    - 26.02.25 12:30 ok, if we use 'a' for atoms and [proc] to define which
+      args go to which local variable, then no need in separate argv access,
+      so '$' with single number refers to local variable - but what if that
+      variable is array? how to access it's members - always full path?
+  - 25.02.25 17:45 define such tag expansions in terms of built-in [proc]'s,
+    not C functions - thus they will have CallFrame, so no need to track every
+    eval frame
+  - 26.02.25 01:13 it would be very comfortable to have named variables, but
+    this requires a map (ususally hash table) in implementation which is not
+    good for constrained implementations, but more seriously, again a change
+    in VarInt or it's array to have strings - but what if apply idea of atoms
+    here again?! e.g. write with variable names and have a table to which
+    numbers they are transformed on "compile"
+    - won't work as-is: atoms are about restoring strings, and will need to
+      have #6.10(uint) - not compact, opposite direction...
+    - 26.02.25 10:30 no need: compilers and assemblers have numbers only and
+      separate debug sections; in simplest case can use #define VARNAME 0 and
+      pass diagnostic notation via C preprocessor first; may define command
+      e.g. 'de' with single argument ignored on execution and containing
+      debug/description info
+      - 27.02.25 22:00 see entry at this time below of two classes
+  - 26.02.25 12:56 this means having separate set of dictionaries in *each*
+    CallFrame for document composability! even in [proc]'s where it's not
+    needed! So again problem of what format stack frame has
+    - 23:58 declare many commands, including simple(0), that they mark current
+      CallFrame as new DictFrame, so that several such commands in a row in one
+      10([...]) will not create additional frames; new DictFrame is initially
+      empty and each DictFrame consists of 128 arrays (one per dictionary)
+      - 27.02 01:20 or the mark must be still in EvalFrame ?...
+        - 01:26 we need it in CBOR, may be magic in 'process-cbor' func?
+          anyway, it depends on the semantics of dictionary-writing commands
+          - 19:00 yes, let's recall how it was looking before interpreter:
+            #6.10([...]) was always for dictionary setup, and it is so
+            *in CBOR*, and expansions of #6.10(#6.121(etc)) also happen only
+            in CBOR, thus no need to change EvalFrame: CBOR is always
+            processed by 'process-cbor' lower-level built-in (which should be
+            exported as decoder's object method), even at top level where
+            interpreter wasn't ever called on this message yet - so this
+            processor can see if #6.10([...]) has no #6.10([...]) parent in
+            CBOR meaning it's dict setup, so implicitly "prepends" to it
+            'push-dict', ';' call, if we want to also provide explicit control
+            on dictionary stack for user, or does it entirely in C (or mixed
+            variant, where only 'unpush-dict' is available to user)
+
+TBD 23.02.25 14:00 pack/unpack functions: to be able to pass a compacted BLOB
+with a schema identifier to be transformed to/from CBOR: so that CBOR can now
+compete with more compact schema-based serialization like Protocol Buffers
+- need some way to exchange supported features of encoder/decoder: pack/unpack
+  have subtle differences between languages/implementations (Jim, Perl,
+  Python, Tcl) so list of keywords and each may be with some description
+
+Rivet https://chiselapp.com/user/rkeene/repository/xvfs/file?name=lib/xvfs/xvfs.c.rvt&ci=tip
+
+set dict0 ""; set y ""; foreach x {org example www} {set y |$x$y; set dict0 [linsert $dict0 0 $y]}; puts $dict0
+
+  [...,
+    'set', 0, "", ';'                         /var 0 as accumulator/
+    'foreach', 1,                             /variable 1 will be loop variable/
+    10(['reverse', "www", "example", "org"]), /TBD/
+    [                                         /foreach body/
+      'set', 0, 10(['strconcat',
+                     10(['to_tstr', '$', 1])
+                     '$', 0
+                   ]),
+      ';',                                    /separator/
+      'unshift', [121], '$', 0                /TBD be dict[0] in 121?/
+    ]
+
+  ]
+
+TBD 24.02.25 01:30 what about template? code clearly need access to output()
+function, which may be unique per each code generator instance, but that is
+solvable by e.g. implicit parsing alias to short name like '.='; however, what
+is the best way to put CBOR code blocks in template? introduce third state
+IN_CODE (or rename all them like INPUT_IS_CODE?) switched off by again some
+byte code invalid in current CBOR? This is in spirit of <? ?> tags, where
+standard IN_CBOR->IN_BLOB switch on e.g. 78 1E is like <?= ?> tags. Advantage
+of such "indefinite-length" switching is that it makes impossible to break in
+middle of CBOR-code element by specifying incorrect length to FC, and also is
+shorter on larger lengths than FC xx yy (and even shorter, as FC needs to be
+typed (have type prefix byte), or else length need to be encoded to FE somehow)
+but what to do with lengths of CBOR array in code? Make special FE xx code to
+switch to IN_CODE and then back just for 1 byte - FF indefinite-length CBOR
+termiantor? Also seems there is no need for big number of Extended Functions
+as they could be enabled by just CBOR code (well, only if to have shorter
+encoding for some, like dictionary switch) so VarInt22/VarElem format need to
+be reconsidered again? it's tempting for '$', [...] make real CBOR array here
+(as in <?= $var ?> shortly switches to code also just for one arg) to avoid
+redesigning format again in future if need will arise - ideally we must have
+only one non-CBOR VarInt format for simplicity, and newer VarElem to this
+date (11.02.25 20:30 version) is not so simple as things were in December
+- 02:40 for one-shot dictionary switch need just two numbers, and this can be
+  done by e.g. limiting atom to 32 bits then taking low and high halfs.. but
+  for pairs like (126,126) it's too much overhead
+- 14:46 make use of FD < 16: 2 bits for convert type, 2 bits array len
+  - but there are only 9 atoms in IN_BLOB
+    - 25.02.25 17:45 make one bit "additional VarInt for conversion function"
+      and it's format is two bytes which would be string payload, so
+      one-letter ASCII will fit in one byte (so 'tstr' and 'bstr' likely be
+      't' and 'b' by default), thus any function can be assigned by parsing
+      aliases, not only CBOR - good for generic BLOBs... also array limited
+      from 2 to 5 members does not limit variable tree depth, just accesible
+      in short form from template
+    - 05.03.25 13:23 if we'll go variable tree "unified CBOR document" way
+      with character strings in VarElem, then use e.g. 0xF0..F3 codes for
+      conversion, and then it looks like enough depth of 9 for IN_BLOB mode
+      but 16 for IN_CBOR mode as CBOR sub-documents in variables may have more
+      depth; and if not, may be optionally provide 'tp' ('template-process')
+      with root variable for such paths?
+      - 06.03.25 17:09 yes, let's go this unified document way, see also this
+        datetime below
+
+TBD 27.02.25 22:00 about wanted variables as non-numbers but strings: let's have
+two classes of decoders, constrained and full, and even describe them in spec
+in separate chapters: so constrained has no local variables and is limited to
+VarInt start byte < 0xC0 and static template so can be decoded in-place; and
+full implementation may have IN_CODE state and named variables - 0xC0..CF be
+strings ("character"), and full implementation can affors to have hashtables
+for maps. Then only thing to solve here is Path Array in Variable Tree: what
+if some level wants both array and map, e.g. 'var' and $1 ? In Tcl they just
+have maps (strings) always... CBOR maps allow to have distinct '1' and 1 keys,
+but this is unfriendly to implementations... this reminds sesctl() !
+
+TBD 04.03.25 17:35 as CBAPT, it may be further extended to be used as
+an alternative to https://capnproto.org/rpc.html for multi-method calls on
+high-latency links (e.g. MQTT5-like and/or for environments when Cap’n Proto
+itself is not applicable, e.g. no direct connections) - for this, should look
+to `jq` utility for needed features, so let's read it's manual and comment:
+- `.[]` is like `@$...`
+- array & object construction: `[.user, .projects[]]` need 'process-cbor'
+  here? but in `jq` input `{user, title: .titles[]}` produces two outputs:
+      {"user":"stedolan", "title": "JQ Primer"}
+      {"user":"stedolan", "title": "More JQ"}
+  - our `foreach` and `lmap` can do, someone can do higher-level syntax
+    compiling to CBAPT if they want
+- for array concatenation and object (hash/map) merging better special
+  functions than `jq`'s overload of `+` or `*` for recursive merge
+- overload of `length` is also doubtful (so they added `utf8bytelength`)
+- `pick` description WTF?..
+- `getpath` and `setpath` are in spirit of last weeks notes...
+- `select` is `grep`, `any` and `all` - use others from List::Util? e.g. they
+  have `reduce`
+- `flatten` discussed weeks above, here it can take levels
+- `sort`: use CBOR encoding for sorting? so numbers first, `undefined` last?
+  then negatives are unnatural... may be make exception for them
+- `min_by` etc: use generic `sort` with code block
+- `indices`, `inside`, `endswith` and `startswith` are ad-hoc versions
+- `combinations` must not be supported: vector for DoS attack
+- same NOT for `repeat` etc.; `recurse` should be carefully thought if DoS
+- but `walk` looks more sane in thius regard
+- `tojson` and `fromjson`: probably also need `tocbor` and `fromcbor` for
+  between encoding and internal representation in variables; may be tags #6.63
+  and 24 be done via this
+- date/time funcs looks like better it be packages/namespaces/modules
+- Alternative operator: // looks like same Perl's
+- try/catch/break already similar to Tcl
+- `.resources[] as {$id, $kind, ...` reminds `lset`
+- `first`, `last`, `nth` (especially with expr) look like idea for
+  Template::Toolkit's methods on interator in [% FOREACH %]
+- "Assignment works a little differently in jq than in most programming
+  languages. jq doesn't distinguish between references to and copies of
+  something [...]  If you're used to programming in languages like Python,
+  Java, Ruby, JavaScript, etc. then you can think of it as though jq does
+  a full deep copy of every object before it does the assignment [...] This
+  means that it's impossible to build circular values in jq (such as an array
+  whose first element is itself). This is quite intentional, and ensures that
+  anything a jq program can produce can be represented in JSON." -- but we
+  already have tags in CBOR for references, even circular...
+- "Note that the LHS of assignment operators refers to a value in `.`. Thus
+  `$var.foo = 1` won't work as expected (`$var.foo` is not a valid or useful
+  path expression in .); use `$var | .foo = 1` instead." -- here looks like
+  distinction `$name::space::varname->{path}->{in}->{var}->[1]` so our scalar
+  get '$' should be rethought a little?..
+  - 06.03.25 17:09 so for '$' let's go variable tree "unified CBOR document"
+    way: beginning of path always about which variable to select, all other
+    members are just ->{strings}->{and_indexes}->[1] no matter these are
+    variables or their contents - so in fact we need just to specify "root"
+    variable, be it local or absolute. So let beginning element of path be:
+    * tstr: name of variable in local CallFrame
+    * uint >= 1: as $1, $2... in shell, args of this proc; regexp capture groups
+    * nint, tstr: local variable of CallFrame immediately parent for -1,
+      grandparent for -2, etc.
+    * 0, tstr: name of gloval variable == top (uplevel #0) CallFrame
+    * TBD bstr is CBOR Sequence of tstr's: namespace variable. Most
+      questionable if we want modules to store proc's in namespaces also...
+      - 17:35 may be tstr and a Perl rule that namespaces contain
+        alphanumeric, all other symbols go global (main) ?
+      - 17:50 Tcl has:
+        | namespace path ?namespaceList?
+        | Returns the command resolution path of the current namespace. If
+        | `namespaceList` is specified as a list of named namespaces, the
+        | current namespace's command resolution path is set to those
+        | namespaces and returns the empty list. The default command resolution
+        | path is always empty.
+        | [...]
+        | Command names are always resolved by looking in the current namespace
+        | first. If not found there, they are searched for in every namespace
+        | on the current namespace's command path (which is empty by default).
+        | If not found there, command names are looked up in the global
+        | namespace (or, failing that, are processed by the appropriate
+        | namespace unknown handler.)
+        so this allows somewhat like inheritance (in fact it is @ISA)
+      - 18:09 use '/' as separator because easier to parse / compact? as root
+        is empty ($::varname) tell this is like MQTT path... yes, and that
+        would be natural method call in MQTT-based RPC!
+        - 07.03 21:00 why parse? plain [cbor, array] is not 10([cmd, array]])
+          so is not interpreted - thus make it natural (and already parsed)
+          namespace delimiter (and MQTT may live in namespace and/or have it's
+          slashes without collisions with our languages); moreover, we may
+          have also name CBOR-Based Assembler/Parsed Tree and specific
+          compression tasks are just a set of commands: "package require CBAR"
+- 07.03.25 16:30 to support compiling to machine code, variables in [proc]'s
+  must provide for (optional if non-compiled but dynamic) typing, for this
+  Tag 21607(uint) [https://cbor.is4.site/cbor-tag] may be used, e.g. tag
+  69(bstr) means array of uint16 (little endian) - but these are incomplete,
+  yet need to define here Major Type and Additional Info for e.g. array/memory
+  size. Also need a command or yet another [proc] argument to declare all used
+  variables in CallFrame, again with such types: all in one place, higher-level
+  languages may define more sugar throughout functions; and also think for
+  some support of closures (Jim Tcl?)
+
 
 
 TODO
