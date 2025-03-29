@@ -2420,6 +2420,31 @@ import()/store() and macro arguments (see notes of previous day); see also
                - 23:10 problem of such aliases in bodies of 'if', 'foreach'
                  etc. where there is no Tag 10 - either this should work
                  everywhere or be expicitly marked by e.g. 'process-cbor'?
+                 - 15.03.25 03:35 not needed if we declare that this happens
+		   for any array passed to 'eval' ('execute'?) function - for
+		   Tag 10 it is done by 'process-cbor', and for command body
+		   (e.g. of 'foreach') this 'eval' will be called by that
+		   command, so everything becomes uniform... but it must be
+		   detailed explanation that on "top" level this is called by
+		   'process-cbor', but on current level for 10([cmd, arg]) it
+		   is called by 'eval' itself: so command substitutions here
+		   will work for 10([topcmd, arg1, 10([get-arg2]), arg3]) but
+		   only on one level - so 'foreach' body here is not touched
+		   as not having Tag 10 immediately on it (in fact same as in
+		   Tcl, just Tcl has only strings and we have entire CBOR)
+		   - 03:50 BTW 'process-cbor' need to have parse-alias (or
+		     even part of syntax?) to support complex CBOR trees in
+		     expressions, for example, assignments like
+		     `$subdocument = {"key1":1, "k2":[0, 1, $myvar, 3]}`
+		     ...this reminds Lisp quotes... but let's start that in
+		     new notes thread, this one is too indented
+               - 13.03.25 then need to alias '$' by other means so that
+		 dynamic dispatch [$cmd args...] still could work, or make it
+		 parsing exception (part of syntax) like '\' or ';'
+                 - 15.03.25 03:30 huh, then same must be done for '@' as list
+                   substitution ("{*}")
+               - 15.03.25 03:20 btw, prohibit '\' in first position as it is
+                 meaningless there?
          - 16:00 what to do if '\' in scope of flattened form?
            - similar to ['ld', '$', var] problem: '$' must be unflattened first
     3) 23.02 01:40 Jim Tcl has [alias name args...] e.g.
@@ -2438,6 +2463,7 @@ import()/store() and macro arguments (see notes of previous day); see also
       chosen: when/where to expand - simple dictionary setup will want to
       first collect arguments of #6.10(bstr) form and then process them in
       a foreach loop
+    - solved later by named vars (tstr)
 
 TBD 17.02.25 all in-CBOR tags applications should be defined in terms of
 applying (elementary) (stack) functions, e.g. #6.10(24(bstr)) as something
@@ -2641,7 +2667,7 @@ to `jq` utility for needed features, so let's read it's manual and comment:
     * uint >= 1: as $1, $2... in shell, args of this proc; regexp capture groups
     * nint, tstr: local variable of CallFrame immediately parent for -1,
       grandparent for -2, etc.
-    * 0, tstr: name of gloval variable == top (uplevel #0) CallFrame
+    * 0, tstr: name of global variable == top (uplevel #0) CallFrame
     * TBD bstr is CBOR Sequence of tstr's: namespace variable. Most
       questionable if we want modules to store proc's in namespaces also...
       - 17:35 may be tstr and a Perl rule that namespaces contain
@@ -2670,6 +2696,72 @@ to `jq` utility for needed features, so let's read it's manual and comment:
           slashes without collisions with our languages); moreover, we may
           have also name CBOR-Based Assembler/Parsed Tree and specific
           compression tasks are just a set of commands: "package require CBAR"
+    - 10.03.25 19:00 don't encode CallFrame sequence into variable access,
+      define it's just as "local scope" (use e.g. "upvar" command if needed)
+      by default being the CallFrame - because it allows future extensions like
+      lexical scopes; also note that we are not programming language per se but
+      Intermediate Representation more closer to high-level assembler, so it
+      may be e.g. 10(['lexical-scope', ['x'], 'foreach','x',[use '$','x'...]])
+      and there is no problem in verbosity here - it is not expected neither
+      in every compressed message (live somewhere by 'ld') nor in non-CBAR
+      programming as those will be generated from some more human-friendly
+      and compact DSL. So:
+      * tstr: name of variable in local or some outer scope: CallFrame in basic
+	version or modified according to rules of some extension command
+      * uint = 0: TBD
+      * uint > 0: temporary variables between dictionary setup in constrained
+	implementations or some other temporary variables in *any* context,
+	e.g. Regexp capture groups or Shell's set -- $@/$*
+	- 15.03.25 23:59 but what with dictionary numbers -e.g. first arg to
+	  splice() ?
+	  - 01:00 scrolled text/notes, it wasn't worked through yet: at first
+	    splice() was acting in variables, of which all were disposed and
+	    variable 0 became the sole dictionary, then from Jan 07 idea of
+	    Alternatives Tags was for encoding and splice() change wasn't
+	    decided yet (so M. Lenders confused variables with dictionaries);
+	    then idea flow went to Stack Machine in February (and then to
+	    prefix notation) again without details of accessing in code; and
+	    'get-atom' ('a') also was just separated from '$' without thinking
+	    of which dictionary is current... in fact, it was not quite needed
+	    until 27 Feb support for string variable names - variable tree in
+	    from of arrays-only was supposed for access to everything (just
+	    assigning exact numbers in it was postponed). This is also tightly
+	    coupled with 'process-cbor' inner works: see 26.02.25 12:56 (and
+	    thread below) for separate (from CallFrame) dictionaries stack by
+	    'process-cbor' - however, now I want uniform variable handling in
+	    functions like splice() so there is nothing special in data model
+	    about dictionaries at all for usability of language in non-CBAR
+	    applications - and even in CBAR not every 'process-cbor' should be
+	    coupled with DictFrame pushing (see e.g. 15.03.25 03:35 for
+	    complex "$subdocument" variable assignment)
+	    - 01:35 as 'process-cbor' is what handles #6.10(#6.121(element)) as
+	      expanding/replacing them to code calls like 10(['$', ...]), this
+	      means that CBAR dictionaries for compression, central there,
+	      must be just one particular-case use of 'process-cbor' in CBAPT
+	      - 18.03.25 Perl makes $1, $2... read-only and dynamically scoped,
+		set only by regexp operations; Shell has same scoping and R/O
+		and additionally sets them in every function or by "set"
+		builtin command - so we also should have them R/O and set only
+		explicitly. But while having Alternatives Tags for selecting
+		from several dictionaries is useful and must be supported, why
+		do we have to localize *all* 128 dicts in DictFrame? Do
+		document composability really need it *this way*? 05-06.02.25
+		quickly changed from register window to (nint) 128*level+dict
+		but at 10.03.25 I considered direct references to CallFrame in
+		variables to be bad for extensibility (baking too early), so
+		may be same thing true for dictionaries? OK, for dictionaries
+		it makes more sense to have access to upper layers, e.g. for
+		inheritance - we're doing templating, after all - but what if
+		composability is doable with only one dictionary redefined?
+		And other uint dict numbers be shifted into positive direction,
+		or even be non-stack but global? It's just simple(0)..simple(6)
+		what looks beautiful for direct assignments to dict 0..6
+		- 19.03.25 02:45 declare like in BPF_PROLOG? which will be
+		  implicitly 1 by simple(0) if no other setup cmds
+		- 19.03.25 04:00 here's strong argument: it's expensive for
+		  constrained implementations to keep 128 dicts *per frame*
+		  so must be explicit dictionary push only
+      * [+tstr]: namespace variable
 - 07.03.25 16:30 to support compiling to machine code, variables in [proc]'s
   must provide for (optional if non-compiled but dynamic) typing, for this
   Tag 21607(uint) [https://cbor.is4.site/cbor-tag] may be used, e.g. tag
@@ -2679,6 +2771,198 @@ to `jq` utility for needed features, so let's read it's manual and comment:
   variables in CallFrame, again with such types: all in one place, higher-level
   languages may define more sugar throughout functions; and also think for
   some support of closures (Jim Tcl?)
+  - 12.03.25 16:15 such compiling, and not only compiling, but even e.g.
+    firewall rules (in non-compiled form) need some "goto but_only_forward",
+    or "skipto" (in firewall case) - seems that "break" and "continue" Tcl
+    codes are not enough here, may be really "skip" and e.g. represent as
+    foreach on some statements collection?
+    - 16:40 make all that codes also accept string in addition to int for
+      going to named label, or that label-named block of loops? see perlsyn
+      for LABEL: while (...) {...}
+  - 18.03.25 to avoid too many arguments to [proc], map may be used:
+    "-static", "-doc" etc. keys; and think of somehow doing this generally
+    instead of Tcl's -options?
+
+13.03.25 https://skarnet.org/software/execline/dieshdiedie.html
+will read nice and -10 from the argv, change the process' nice value, then exec into the command echo blah. This is called chain loading by some people, and Bernstein chaining by others.
+
+15.03.25 Lisp
+You can also <i>splice</i> an evaluated value into the resulting list, using the special marker ‘,@’.
+
+ progn evaluates forms, in the order in which they are given.
+The values of each form but the last are discarded.
+
+let and let* create new variable bindings and execute a series of forms that use these bindings
+
+
+19.03.25
+The x87 registers form an eight-level deep non-strict stack structure ranging from ST(0) to ST(7) with registers that can be directly accessed by either operand, using an offset relative to the top, as well as pushed and popped. (This scheme may be compared to how a stack frame may be both pushed/popped and indexed.)
+
+There are instructions to push, calculate, and pop values on top of this stack; unary operations (FSQRT, FPTAN etc.) then implicitly address the topmost ST(0), while binary operations (FADD, FMUL, FCOM, etc.) implicitly address ST(0) and ST(1). The non-strict stack model also allows binary operations to use ST(0) together with a direct memory operand or with an explicitly specified stack register, ST(x), in a role similar to a traditional accumulator (a combined destination and left operand). This can also be reversed on an instruction-by-instruction basis with ST(0) as the unmodified operand and ST(x) as the destination. Furthermore, the contents in ST(0) can be exchanged with another stack register using an instruction called FXCH ST(x).
+
+These properties make the x87 stack usable as seven freely addressable registers plus a dedicated accumulator (or as seven independent accumulators).
+
+
+security considerations - escaping in templates (like HTML)
+
+21.03.25 jinja2 templates:
+loop.index & loop.index0 and methods like .previtem may be helpful for compression
+- "Unlike in Python, it’s not possible to break or continue in a loop" - huh,
+  we can
+- "The advantage is that the special loop variable will count correctly;
+  thus not counting the users not iterated over."
+  - we have multiple lists to iterate on, one of which may be such counter
+    TBD think about generator coroutines to help with large range()
+- TBD loop recursive - is it needed, or map/lambda is better?
+-
+
+
+29.03.25 Original from
+https://github.com/anr-bmbf-pivot/draft-lenders-dns-cbor/pull/7/files : 
+==8<==
+Take the following CBOR object _o_ (note that this is intentionally not legal "application/dns+cbor" to illustrate generality).
+
+~~~ edn
+[
+  "www", "example", "org",
+  ["svc", "www", "example", "org"],
+  "org", "example", "org", 42,
+  "svc", "www", "example", "org", 42
+]
+~~~
+{: #fig:name-compression-example-unpacked title="Unpacked example for implicit text string suffix sequence compression."}
+
+This would generate the following virtual table _V_.
+
+~~~ edn
+[
+    ["www", "example", "org"],
+    ["example", "org"],
+    ["org"],
+    ["svc", simple(0)],
+    ["org", "example", "org"]
+]
+~~~
+{: #fig:name-compression-example-table title="Implicit table of shared items for the example."}
+
+Note that the sequence "org", "example", "org" is added at index 4 with leading "org", instead of referencing index 2 + index 1 (`simple(2), simple(1)`), as it is its own distinct suffix sequence.
+
+The packed representation of _o_ would thus be:
+
+~~~ edn
+TBD28259(
+  [
+    ["www", "example", "org"],
+    ["svc", simple(0)],
+    "org", simple(1), 42,
+    simple(3), 42
+  ]
+)
+~~~
+{: #fig:name-compression-example-packed title="The packed representation of the example."}
+
+Note, with "application/dns+cbor;packed=0" the surrounding TBD28259 can be elided (even though the content would not be parsable as application/dns+cbor).
+
+With, e.g., table setup tag 113, further packing can be achieved via nesting table packing.
+
+~~~ edn
+TBD113(
+  TBD28259(
+    [
+      ["org", 42],
+      [
+        ["www", "example", simple(5)],
+        ["svc", simple(0)],
+        simple(5), simple(1), simple(6),
+        simple(3), simple(6)
+      ]
+    ]
+  )
+)
+~~~
+{: #fig:name-compression-example-packed-113 title="The packed representation of the example with additional table setup."}
+
+Note, how the previous references in {{fig:name-compression-example-packed}} do not changed, as the table `["org", 42]` is appended.
+==8<==
+
+
+Now let's create CBAPT function for it
+
+
+10([
+  'proc', 'name-comp', ['domain-list'], /procedure with single argument/
+  [ /procedure body/
+   'set', 'atom-list', [], ';'         /initialize empty array local var/
+   'foreach', 'fqdn', '@','domain-list',    /loop variable called "fqdn"/
+   [ /outer foreach body - on full domains from 'domain-list' array/
+      'set', 'accum', '', ';'                 /empty string to accumulator/
+      'foreach', 'label',                     /loop variable called "label"/
+           10(['lreverse', '@', 'fqdn']),     /on reversed label list/
+      [ /inner foreach body/
+        'if', ['is_cbor_uint', '$', 'label'], /reference instead of label?/
+	[ /if "then" body/
+	  'set', 'label', '$',                /to value of CBOR Pointer /
+	         ['atom-list',                /in 'atom-list' var: array/
+		              '$', 'label']   /index in 'label' in this case/
+	], ';'
+        'set', 'accum',              /set accum to string concatenation/
+	       10(['strconcat',      /of value of "label" variable converted/
+	            10(['to_tstr', '$', 'label']),  /to CBOR Major Type 3 /
+		    '$', 'accum'     /and previous value of "accum" var  /
+	          ]),
+        ';',                            /command separator (end of 'set') /
+	/now prepend value of "accum" variable to 'atom-list' array/
+	'unshift', 'atom-list', '$', 'accum' /TBD is 'linsert' more readable?/
+      ],
+   ], ';'
+   /*** NOTE TODO this lacks error-checking and suppression ***/
+   /*** of repeated entries - but you get the core idea     ***/
+   'return', 10(['@', 'atom-list'])           /make list from array/
+  ], /end of procedure body/
+  ';'
+  'parse-alias', 'nc', 1, 'name-comp' /for shortened spliced use/
+])
+
+Now, assume procedure above is imported by tag or media type, so it can be
+used in following way:
+
+    10([simple(0),
+        "foo",          /Atom 0/
+	'nc',           /call function and substitute it's return values/
+	[               /this will create 7 atoms/
+          ["svc", "www", "example", "org"],
+          ["datatracker", "ietf", 3]        /atom-list[3] is "org"/
+        ],
+	"bar",          /Atom 8/
+        "baz",          /Atom 9/
+        h' /CBAR rump/
+	  8F            /outer array/
+	  3D            /Atom 2: CwwwGexampleCorg/
+	  84            /inner array/
+          1E            /Atom 1: CsvcCwwwGexampleCorg /
+	  5E            /Atom 5: KdatatrackerDietfCorg /
+	  18 2a         /42/
+          1E            /Atom 1: CsvcCwwwGexampleCorg /
+	  1D            /Atom 0: Cfoo /
+	  9C            /Atom 8: Cbar /
+	  9D            /Atom 9: Cbaz /
+  	'
+    ])
+
+[
+  "www", "example", "org",                               
+  ["svc", "www", "example", "org"],
+  "datatracker", "ietf", "org", 42,
+  "svc", "www", "example", "org",
+  "foo", "bar", "baz"
+]
+00000000  8f 43 77 77 77 47 65 78  61 6d 70 6c 65 43 6f 72  |.CwwwGexampleCor|
+00000010  67 84 43 73 76 63 43 77  77 77 47 65 78 61 6d 70  |g.CsvcCwwwGexamp|
+00000020  6c 65 43 6f 72 67 4b 64  61 74 61 74 72 61 63 6b  |leCorgKdatatrack|
+00000030  65 72 44 69 65 74 66 43  6f 72 67 18 2a 43 73 76  |erDietfCorg.*Csv|
+00000040  63 43 77 77 77 47 65 78  61 6d 70 6c 65 43 6f 72  |cCwwwGexampleCor|
+00000050  67 43 66 6f 6f 43 62 61  72 43 62 61 7a           |gCfooCbarCbaz|
+
 
 
 
