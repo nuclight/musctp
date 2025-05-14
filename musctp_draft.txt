@@ -238,6 +238,7 @@ to provide a fully functional QUIC implementation, and this develop-
 ment of a new QUIC protocol stack may further delay QUIC support
 in OpenSSL by months, if not years.
 
+TBD 18.04.25 incorporate some features of gRPC
 
 
 1.1. Общий обзор.
@@ -3571,6 +3572,22 @@ file, mmap window?
 -- so the entire sysctl tree may be just CBOR tree with some nodes being
 accessible by path, but where leaf could be complex CBOR value as well;
 attributes and SYSCTL_PROC could be represent by CBOR tags in such tree
+- 09.04.25 14:00 reading (referenced by CBOR STD) MSDTP [RFC 713] - it did not
+  had maps, but it (already 49 years ago!) had something similar to YAML tags
+  and STRUC's had their size in bytes - that is, easy to navigate in file or
+  database (so EBML just added streaming, like CBOR; also indexing reminds of
+  PBMFS) and it also had USTRUC's (for "uniform") where type is single for all
+  e.g. for strings - CBOR added tags 64-80 after several years; and most
+  surprising for 1976 year, it allowed up to 128 bytes for *size* integer -
+  that is, up to 2^(128*8) byte (while Universe has ~10^80 atoms ~= 3*2^264)
+  strings in length!
+
+TBD 09.04.25 ~23:10 radical idea: as CBAR/CBAPT is targeted to RPC calls, what
+if to pass arguments to command calls in it, instead of "variable tree" with
+SYSCTL_PROC as in older SNMP/sysctl? Moreover, if to change most internal
+streams to CBAPT ? May be even some of regular user data streams structure?
+Of course, they will retain current bit-crunched formats for efficiency, but
+these will be for pack/unpack/binary scan commands so can be extensible
 
 TODO
 

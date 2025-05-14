@@ -1023,6 +1023,8 @@ TBD use 22098 for recursive "after unpacking, there are more CBAR inside"?
 TBD 10.01 02:40 or that tag could be just inside binary string itself?
 
 TODO table of #6.10 sequences variants TBD where to put Alternatives if 63/24?
+- 09.04.25 09:30 as YAML defines Tag to be URI, we can take URI idea that it
+  can have ?query=part&in=no&particular=order
 
   This way, tag #6.10 could be used just for binary strings unpacking, not
   altering CBOR tree structure at all - hence "B" in "CBAR" is for generic
@@ -1526,7 +1528,7 @@ as general templating mechanism, e.g. generating arrays with [% FOREACH %]
   / "@type": "Lamp",      "id":   "0",                            = 12 bytes /
     7C 08    64 4C616D70  62 6964 61 30
   /  "base":      "http://192.168.1.103:8445/wot/thing",          =  7 bytes /
-    64 62617365   7C F8
+    64 62617365   7C F8  /FIXME/
   / "@context":                                                   =  9 bytes /
     68 40636F6E74657874
   / "http://192.168.1.102:8444/wot/w3c-wot-td-context.jsonld"     = 41 bytes /
@@ -2596,6 +2598,12 @@ date (11.02.25 20:30 version) is not so simple as things were in December
       with root variable for such paths?
       - 06.03.25 17:09 yes, let's go this unified document way, see also this
         datetime below
+    - 05.04.24 02:00 we can define that FD 0x < 9 is treated as if it was
+      10([_x CBOR]) instead of VarElem array so that *any* [conversion]
+      function can be called here, without dealing with bits, and it even will
+      be reasonably short with proper 'parse-alias' and may even have more
+      arguments by nested 10(['echo', args...]) than limit of 9... this would
+      be good analog of <?= ?> but can it also replace IN_CODE totally?
 
 TBD 27.02.25 22:00 about wanted variables as non-numbers but strings: let's have
 two classes of decoders, constrained and full, and even describe them in spec
@@ -2963,6 +2971,42 @@ used in following way:
 00000040  63 43 77 77 77 47 65 78  61 6d 70 6c 65 43 6f 72  |cCwwwGexampleCor|
 00000050  67 43 66 6f 6f 43 62 61  72 43 62 61 7a           |gCfooCbarCbaz|
 
+
+TBD 07.04.25 22:00 delta encoding: is it worth in VarElem for some to be delta
+to last output atom number? requires 3 ranges: absolute, +N and -N, how many
+for each? and again FC do not need neither character names nor deltas
+- ^^vv may be use 7C 0n for deltas like FD 0n is array and not atom?
+TBD 07.04.25 23:00 need to think more about atom typing, it's already have
+slightly different handling of #6.63 in atom setup and in processed CBOR, and
+in MyLED example we always use 7C xx conversion from bstr to tstr - if change
+it to single-byte IN_CBOR atoms, then 535 byte example could be 40+ bytes less!
+
+
+TODO 21.04.25 for just returning arguments use ['id', arg1, arg2, ...]:
+> Similarly, the function
+>    id ⁡ ( x ) = x {\displaystyle \operatorname {id} (x)=x}
+> can be rewritten in anonymous form as
+>    x ↦ x {\displaystyle x\mapsto x}
+> where the input is simply mapped to itself.[d]
+
+
+TBD 01.05.25 22:30 The simple(0)..simple(6) and 15.03.25 03:35, 15.03.25 23:59
+threads: let's define simple(D) function pseudocode as:
+   if dicts[D] is not null:
+      push D+1 null's to beginning of dicts[] so that
+      dicts[0] moves to dicts[D+1], etc.
+   dicts[D] = process arguments expanding them by atoms with current
+              dictionary set to D
+   set digit variables (for 10(0), 10(1) etc.) if has rump TBD for >0 also?
+   process rump in DWIM fashion
+so after [simple(3), "Lisp", "Perl", "Python", "Ruby", "Tcl"] it then could be
+used [simple(0), "foo", "bar", "baz"] and language names remain at dicts[3]
+while dicts[1] and dicts[2] are empty, so simple(1) and simple(2) can be
+issued in any order, or it can even be 10(["set-dict", 2, 100]) for doing
+dicts[2]=dicts[100] to access distant dictionary one byte less; of course
+dicts[] is stack variable local to 'process-cbor' (with references to actual
+refcounted arrays) so such ["set-dict"] will be canceled on return just as
+other "pushed" dictionaries
 
 
 
