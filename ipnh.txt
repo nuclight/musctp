@@ -1401,6 +1401,9 @@ main? Also, while here, compression should be made from single entry to
    using some "dictionary", either in zlib style or by well known
    IANA-established means.
 
+TBD 27.05.25 what about starting from 0xCA as raw CBAPT-compressed CBOR? and
+starting from 0xD* also - as a generic CBOR tag start
+
 TBD
 
 2.4.1. Unfragmented part.

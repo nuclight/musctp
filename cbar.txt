@@ -1,4 +1,4 @@
-   !!! early draft!
+!!! this is NOT usual I-Draft but keeps think history, skip to "15.12.24"
 
       CBAR: CBOR and generic BLOBs by-Atom Reducing
       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3008,6 +3008,20 @@ dicts[] is stack variable local to 'process-cbor' (with references to actual
 refcounted arrays) so such ["set-dict"] will be canceled on return just as
 other "pushed" dictionaries
 
+TBD 03.06.25 give an optional tiny integer so simple(0) al last arg before
+rump for using that number of simple(1)..simple(15) in addition to single-byte
+atoms - so that e.g. 24 single-byte values could be used instead of 16 (18 in
+unfixed version)
+
+TBD 07.06.25 02:30 an FE code in CBAR for "ref this string up to 8 bytes and
+add it to atom table" specifically for DNS IPv6 compression? a sequences of
+zeroes may be also borrowed from GHC?
+- 11.06.25 02:00 so try GHC like, 0x80..82 are state switching, and:
+  0xFE 1000nnnn where n > 2 (83..8F): 0b0000nnnn bytes of zeroes
+  0xFE 0nnnkkkk = Backreference: n = 0b00000nnn+2; s = 0b0000kkkk+n;
+                | append n bytes from CBAR input, starting s bytes
+                | to the left of the current output pointer;
+                | add this string as next atom to current dict
 
 
 TODO

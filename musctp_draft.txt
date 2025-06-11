@@ -3588,6 +3588,15 @@ SYSCTL_PROC as in older SNMP/sysctl? Moreover, if to change most internal
 streams to CBAPT ? May be even some of regular user data streams structure?
 Of course, they will retain current bit-crunched formats for efficiency, but
 these will be for pack/unpack/binary scan commands so can be extensible
+- 28.05.25 19:30 actually this doesn't buy much: the commands nevertheless
+  must be organized to some hierarchy - be it Some::Namespace::Cmd or
+  assoc.retransmax is not structurally different. However, it allows thinking
+  like Tk widget hierarchy or method calls on object beyond just get/set, e.g.
+  `Algorithm.HMAC listchildren`. In fact, the only PRO of single CBOR document
+  is ability to get many values in bulk, saving round trips - but only if
+  "truncated"/"restart from" problem is solved, and it doesn't play well with
+  nodes which are RPC procedures instead of pure data. Ironically, CBAPT's
+  design goal (next after packing) is also saving round trips in RPC calls...
 
 TODO
 

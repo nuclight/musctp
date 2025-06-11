@@ -1,0 +1,274 @@
+
+
+
+
+
+
+Network Working Group                                       V. Goncharov
+Request for Comments: 9NNN                                    Consultant
+Category: Draft Standard                                      C. Bormann
+ISSN: 2070-1721                                  Universitaet Bremen TZI
+                                                          September 2025
+
+
+	  CBOR Simple Values Range for Packing and Templating         
+
+
+Abstract
+
+   The Concise Binary Object Representation (CBOR, RFC 8949 == STD 94)
+   is a data format whose design goals include the possibility of
+   extremely small code size, fairly small message size, and
+   extensibility without the need for version negotiation.
+
+   CBOR does not provide any forms of data compression.  While
+   traditional data compression techniques such as DEFLATE (RFC 1951)
+   can work well for CBOR encoded data items, their disadvantage is that
+   the recipient needs to decompress the compressed form to make use of
+   the data.
+
+   This document describes a set of CBOR simple values which can be used
+   by different specifications utilizing them for CBOR transformations,
+   such as compression or templating, in a non-conflicting way.  This
+   allows for future standards to reuse the smallest values range while
+   inventing better ways to use them for achieving their goals.
+
+Status of This Memo
+
+   This is an Internet Standards Track document.
+
+   This document is a product of the Internet Engineering Task Force
+   (IETF).  It represents the consensus of the IETF community.  It has
+   received public review and has been approved for publication by the
+   Internet Engineering Steering Group (IESG).  Further information on
+   Internet Standards is available in Section 2 of RFC 7841.
+
+   Information about the current status of this document, any errata,
+   and how to provide feedback on it may be obtained at
+   https://www.rfc-editor.org/info/rfc8949.
+
+Copyright Notice
+
+   Copyright (c) 2025 IETF Trust and the persons identified as the
+   document authors.  All rights reserved.
+
+   This document is subject to BCP 78 and the IETF Trust's Legal
+   Provisions Relating to IETF Documents
+   (https://trustee.ietf.org/license-info) in effect on the date of
+   publication of this document.  Please review these documents
+   carefully, as they describe your rights and restrictions with respect
+   to this document.  Code Components extracted from this document must
+   include Simplified BSD License text as described in Section 4.e of
+   the Trust Legal Provisions and are provided without warranty as
+   described in the Simplified BSD License.
+
+Terminology and Conventions
+
+ the usual RFC 2119 blabla
+
+Motivation
+
+   In a world of constrained devices (IoT) such devices are often have
+   very little memory.  While these devices are also constrained in
+   e.g. packet size so that compression is very desirable.  Traditional
+   generic compression algorithms like DEFLATE [RFC1951] perform well
+   but require memory both for decompressed data and internal state of
+   decompressor itself.  Many constrained implementations would want to
+   trade-off between compression ratio and required memory - tolerating
+   worse compression by lowering memory usage, ideally to zero bytes
+   (that is, using compressed data in-place as-is).  In the ongoing IETF
+   efforts the "MyLED" example in JSON [MyLED] takes 1210 bytes
+   converted to CBOR which may be further reduced to about 350 bytes
+   using DEFLATE, but this require more than 1.5 Kbytes of memory during
+   decompression - in contrast, work in progress specifications like
+   [draft-cbor-packed] and [CBAR] are able to reduce this example to
+   about 500 bytes, however accessible in-place, without need for
+   decompression buffer at all.
+
+   Sixteen simple values were intended to be used for compression
+   purposes in the original CBOR proposal, but didn't get into the
+   standard at the time being due to the complexity of the task.  Since
+   then, more than one proposal for compression techniques has appeared.
+   While the usual way for Internet specifications is to acquire
+   different codepoints (or ranges of them) from IANA, this is does not
+   work well in the compression world given the specifics of CBOR
+   encoding - that is, different numbers are encoded in CBOR occupying
+   different number of bytes.  Compression efficiency, however, is very
+   sensitive to length of codes used - the shorter is better.  Thus,
+   registration of short codes range for one standard exclusively would
+   put other standards - especially future standards - into inequal and
+   unfair position if there are no more short codes left for them.
+   However, it is known that future inventions tend to be more effective
+   in usage of same resources but are impossible to predict at the time
+   of prior standard issued (otherwise enhancements would be already
+   incorporated into it).  As (at the time of writing) there are only 20
+   single-byte CBOR simple values available for registration, such
+   situation can situation can happen with just the first standard
+   accepted.
+
+   Therefore, this document registers first sixteen CBOR simple values
+   (0 to 15) in such a way that they could be used by different
+   compression methods (different specifications), both existing and not
+   yet invented.  The way for decoder to distinguish them - that is, to
+   interpret according to one specification or another - is done via
+   CBOR Tag (acting as a "namespace") or by external means such as
+   messages' media type.
+
+Specification
+
+   This document registers CBOR values simple(0) to simple(15) for needs
+   like packing or templating CBOR documents.
+
+   The semantics of these simple values 0 to 15 is that they are
+   references (indexes) to some (kept by decoding process) table, or
+   part of such table, so that instead of simple value an integral
+   number of CBOR items is substituted from table entry. Note that this
+   replacement items do not necessarily form a complete well-formed CBOR
+   item if viewed separately as entry in the table. For example,
+   a sequence
+
+        [..., 1, 2, simple(2), "a", "b", "c", ...]
+
+   could expand to
+
+        [..., 1, 2, ["foo", "bar, "a"], "b", "c", ...]
+
+   if the entry for simple(2) at this moment contained definite-length
+   array start item (0x83) and two string items "foo" and "bar".
+
+   (Informally speaking, this could be described as "cut" in text editor
+   a whole number of tokens (counting each string, brace, etc. as one
+   token) in CBOR diagnostic notation and then "paste" it instead of
+   each simple(N) occurrence).
+
+   Therefore, as usage of simple(0)..simple(15) can modify structure of
+   CBOR document, they SHOULD be treated as error if used outside of an
+   area where table (or part of such table) is not set up, e.g. outside
+   of "namespace" tag or implied by media type. Exact mechanism to setup
+   such tables (or modify it so that same simple value may expand to
+   different content in different parts of CBOR stream) is left for
+   definition by application protocol, or an application protocol may
+   "inherit" it (implemented in a library) from generic specification
+   from appropriate IETF RFC document (such as [draft-cbor-packed]).
+
+   Note that it is straightforward to have usage of simple values of
+   different compression/templating specifications in the
+   non-overlapping areas of a single CBOR document, because the primary
+   method for specifications to manifest themselves is via using some
+   CBOR Tag(s) as a "namespace", like in this example:
+
+      {
+        "foo": 5550([..., simple(1), /meaning by spec 1/ ...]),
+	"bar": 5551([..., simple(1), /meaning by spec 2/ ...])
+      }
+
+   (the tag numbers here are fictitious to be used just as an example).
+
+   Tag nesting, however, which could be used for things like providing
+   output of one decompression phase (by one specification) as input for
+   another (by same or different specification) is more complicated case
+   and intentionally left out from this document to be defined by actual
+   specifications.  It is just noted here for specifications' authors
+   that possibility of such multi-phase (nested) processing is the
+   reason for a "should" requirement above instead of "must" because
+   simple values (of 0..15 range) produced as a result one phase may be
+   fed to a different decoder.
+
+   Application protocols using CBOR simple values in 0..15 range, or
+   generic packing/templating specifications, should include reference
+   to this RFC about using range and then describe precise usage of
+   these simple values.
+
+IANA Considerations
+
+   In the registry "CBOR Simple Values" [IANA.cbor-simple-values], IANA
+   is requested to allocate the simple values defined in Table 1.
+
+       +=======+===================================+===========+
+       | Value | Semantics                         | Reference |
+       +=======+===================================+===========+
+       | 0..15 | Packing and templating: shared by | RFC 9NNN  |
+       |       | multiple specifications           |           |
+       +-------+-----------------------------------+-----------+
+
+                          Table 1: Simple Values
+
+Security Considerations
+
+   The security considerations of [STD94] apply.
+
+   If the specification chooses to implement generic non-well-formed
+   entries in table (modifying CBOR structure as in example above), care
+   must be taken to avoid implementation bugs potentially leading to
+   out-of-bounds accesses.
+
+   Specifications must decide what to do with possibility of decoding
+   loops or infinite recursion, for example, if table entry for
+   simple(M) includes another simple(N) values which then may be
+   expanded recursively.  Possible ways are either to not expand it at
+   all, allowing for aforementioned multi-phase processing, or provide
+   counter-measures similar to symlink processing in filesystems, or
+   something else.
+
+Normative References
+
+   [BCP14]    Best Current Practice 14,
+              <https://www.rfc-editor.org/info/bcp14>.
+              At the time of writing, this BCP comprises the following:
+
+              Bradner, S., "Key words for use in RFCs to Indicate
+              Requirement Levels", BCP 14, RFC 2119,
+              DOI 10.17487/RFC2119, March 1997,
+              <https://www.rfc-editor.org/info/rfc2119>.
+
+              Leiba, B., "Ambiguity of Uppercase vs Lowercase in RFC
+              2119 Key Words", BCP 14, RFC 8174, DOI 10.17487/RFC8174,
+              May 2017, <https://www.rfc-editor.org/info/rfc8174>.
+
+   [IANA.cbor-simple-values]
+              IANA, "Concise Binary Object Representation (CBOR) Simple
+              Values",
+              <https://www.iana.org/assignments/cbor-simple-values>.
+
+   [STD94]    Internet Standard 94,
+              <https://www.rfc-editor.org/info/std94>.
+              At the time of writing, this STD comprises the following:
+
+              Bormann, C. and P. Hoffman, "Concise Binary Object
+              Representation (CBOR)", STD 94, RFC 8949,
+              DOI 10.17487/RFC8949, December 2020,
+              <https://www.rfc-editor.org/info/rfc8949>.
+
+   [I-D.ietf-cbor-packed]
+              Bormann, C. and M. Gütschow, "Packed CBOR", Work in
+              Progress, Internet-Draft, draft-ietf-cbor-packed-13, 1
+              September 2024, <https://datatracker.ietf.org/doc/html/
+              draft-ietf-cbor-packed-13>.
+
+Informative References
+
+   [RFC1951]  Deutsch, P., "DEFLATE Compressed Data Format Specification
+              version 1.3", RFC 1951, DOI 10.17487/RFC1951, May 1996,
+              <https://www.rfc-editor.org/rfc/rfc1951>.
+
+   [MyLED]    <https://github.com/w3c/wot-thing-description/raw/
+              db8abb3655afc7f149db7976ba4e79149619f537/test-bed/data/
+	      plugfest/2017-05-osaka/MyLED_f.jsonld>
+
+   [CBAR]     Goncharov, V., "CBOR & generic BLOB by-Atoms Reducing",
+              Work in Progress,
+	      <https://github.com/nuclight/musctp/blob/main/cbar.txt>
+
+Authors' Addresses
+
+   Carsten Bormann
+   Universität Bremen TZI
+   Postfach 330440
+   D-28359 Bremen
+   Germany
+   Phone: +49-421-218-63921
+   Email: cabo@tzi.org
+
+   Vadim Goncharov
+   Email: vadimnuclight@gmail.com
+
