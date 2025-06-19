@@ -90,7 +90,7 @@ Motivation
    standard at the time being due to the complexity of the task.  Since
    then, more than one proposal for compression techniques has appeared.
    While the usual way for Internet specifications is to acquire
-   different codepoints (or ranges of them) from IANA, this is does not
+   different codepoints (or ranges of them) from IANA, this does not
    work well in the compression world given the specifics of CBOR
    encoding - that is, different numbers are encoded in CBOR occupying
    different number of bytes.  Compression efficiency, however, is very
@@ -103,8 +103,7 @@ Motivation
    of prior standard issued (otherwise enhancements would be already
    incorporated into it).  As (at the time of writing) there are only 20
    single-byte CBOR simple values available for registration, such
-   situation can situation can happen with just the first standard
-   accepted.
+   situation can happen with just the first standard accepted.
 
    Therefore, this document registers first sixteen CBOR simple values
    (0 to 15) in such a way that they could be used by different
@@ -119,7 +118,25 @@ Specification
    This document registers CBOR values simple(0) to simple(15) for needs
    like packing or templating CBOR documents.
 
+   This specification tries, speaking in object-oriented terms, to be
+   the "Abstract Base Class" for other specifications to "inherit", in
+   the sense of describing meaning as broad as possible, but concrete
+   specifications do not need to implement every imaginable feature and
+   MAY choose to define only subset.
+
    The semantics of these simple values 0 to 15 is that they are
+   substitutions for one or several other CBOR items.  That is, when
+   decoder sees values simple(0) to simple(15), it treats them as some
+   mapping function (0 to 15 may be viewed as argument here) which takes
+   argument and, depending on current decoder state, returns CBOR
+   item(s) to substitute instead of simple value, as if simple value
+   never occured in the stream, but returned CBOR item(s) occured
+   instead.
+
+   Such mapping function may be very complex, taking into account even
+   surrounding CBOR items context to decide.  Or (especially expected
+   for short-term solutions) "inheriting" specification may choose it
+   to be rather simple, for example, simple(0)..simple(15) could be
    references (indexes) to some (kept by decoding process) table, or
    part of such table, so that instead of simple value an integral
    number of CBOR items is substituted from table entry. Note that this
@@ -131,7 +148,7 @@ Specification
 
    could expand to
 
-        [..., 1, 2, ["foo", "bar, "a"], "b", "c", ...]
+        [..., 1, 2, ["foo", "bar", "a"], "b", "c", ...]
 
    if the entry for simple(2) at this moment contained definite-length
    array start item (0x83) and two string items "foo" and "bar".

@@ -1011,6 +1011,9 @@ number of nibbles, each descirbing number of bytes?
 - may be useful for constrained (IoT) format (HCver=1), but too complex for
   performance one, e.g. in common task "reverse source and destination";
   also constrained may utilize hextet-compressed from early BPF64
+  - 13.06.25 01:24 what if just one bit in flags for reverse? will greatly
+    speed up generating answer packets... but less easier for lookup by
+    destination address... though Next Hop should mitigate this
 - in fact, the primary representation, at conceptual level, is CBOR, even if
   particular optimized implementation will never do CBOR - so we don't need
   arbitrary formats here, like integers up to 128 bits for boths IPv6 and MAC
