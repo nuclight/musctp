@@ -7901,5 +7901,12 @@ values instead of wasting bit
 
 TBD study "Rapid Reset" HTTP/2 attack, invent countermeasures if applicable to us
 
+TBD 29.06.25 load balancers: round-robin is bad for TCP performance, make us
+somehow resilient to misordered packets; another UDP port for each stream: is
+it good or bad idea?
+- 16:15 for UDP ports seems idea bad
+- 19:45 try rule: when gap, if highest recvd TSN is not an End chunk, delay SACK
+  reply by RTTvar of peer
+
 
 TODO

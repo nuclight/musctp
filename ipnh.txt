@@ -148,6 +148,13 @@ TODO 30.11.24 paragraph about OSI wrong and new (sub)Layers: 2.4 - ARP,
         - yes, this is really better then ICMP Echo, because you can't receive
 	  ICMP to ICMP, e.g. "MTU exceeded" for 2000 byte DF ping
         - 01.12 seems it's ERR.. may be UDP echo/discard ports are better?
+  - 20.07.25 given variant 26.11.24 for fragmentation, may move FrL to Flags
+    and then combine it with E2E Opts as fragment offset, 10 bits: so we can
+    have at least 4096 bytes (usable for DHCP), but probably need to change
+    Frg here to another meaning
+    - what to do with L3.5Len then? combine with offset? unbeautiful...
+    - what if balancers still may need of beginning of packet copy which
+      contained in many ICMP messages? still put into L3.5Len ?
 
 2.1. Overview of packet and main concepts.
 
@@ -243,6 +250,11 @@ Operational Aspects: NSIS not only required trust between customers and their pr
   load than possible in BGP4 with PI addresses, where granularity for the same
   (PI) IP subnet, by path-prepending, is per-destination AS at best, if not
   per-provider channel only like "this ISP is primary and this is backup".
+  - 12.07.25 another possibility is ICMP message from border gateway
+    "use this prefix for your 5-tuple", with TTL and boolean whether original
+    packet was dropped (need retry) or just switch for next packet; other ICMP
+    message should be about HostID collision - see IP45 proposal for SIDs
+    TBD check about security there
 
 
 2.1.2. Addresses: hierarchy, compatibility, extensibility.
@@ -447,6 +459,23 @@ thus a MUST to have relative addressing as in above paragraphs)
     restriction that no address is prefix of another address, so that CARP
     scenario with L2 bridged triangle should be doable with proper addresses
     selection
+- 12.07.25 http://ip45.org/wp-content/uploads/2013/12/paper-emfonts1.pdf :
+  <<one of the key advantages provided
+by NAT is the *address independency* and *reusing single IP
+address* by many devices. In practice, it does not matter how
+many NATs are connected in the chain and the IP network
+topology can be arranged into hierarchical and recursive struc-
+ture as shown in ﬁgure 1. The remaining beneﬁts provided
+by NAT are, generally, the result of the two main attributes
+mentioned before. In a very easy and cheap way, the *address
+independency* allows us to implement features like small site
+multihoming without running a BGP router [10], or to change
+the upstream ISP without the readdressing of all devices.
+Another frequent reason for using NAT is the consequence
+of *reusing a single IP address*. Firstly, it hides the internal
+structure of the network and secondly, it forbids a connection
+with a device in the NATed network from the outside. Both of
+them are considered as security features.>>
 
 TBD 04.11.24 uni-flow TCP3-like, CCCP and RFC 3124 (Congestion Manager):
 << sender and receiver.  For the Internet to remain stable, each of
@@ -732,6 +761,10 @@ fragmentation, even examples as hash function (von Neumann) from 5-tuple
 (BTW this function may be useful in other contexts, not this header), or
 another application is for flows outside of IPsec (where full is hidden)
 so it's probably doesn't make sense to expand this field
+
+TBD 29.06.25 an "out-of-order possible" flag as indicator from round-robin
+balancers - in current Internet this affects baldy TCP performance, but
+flow-based balancing not always possible (tunnels etc.)
 
 TODO
 
