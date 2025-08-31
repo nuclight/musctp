@@ -240,6 +240,8 @@ in OpenSSL by months, if not years.
 
 TBD 18.04.25 incorporate some features of gRPC
 
+TBD 28.07.25 look at paths with attributes from https://www.openconfig.net/docs/gnmi/gnmi-specification/ like `/a/b[name=b1]/c/d` (is it from YANG or independent?) and updating them like union_replace merge
+
 
 1.1. Общий обзор.
 
@@ -577,6 +579,7 @@ TBD reflection problem for Key ID
    between the arbitrary data and some content that was meant to remain
    secret, such as a security token, thereby allowing the attacker to
    get at the secret.
+Section 2.6 of [RFC7457]
 
 2. Общий формат пакетов, идентификаторов и структур адресов.
 
@@ -1886,7 +1889,7 @@ Lisp introduced the notion of interned strings for its symbols. Historically, th
 
 Modern Lisp dialects typically distinguish symbols from strings; interning a given string returns an existing symbol or creates a new one, whose name is that string. Symbols often have additional properties that strings do not (such as storage for associated values, or namespacing): the distinction is also useful to prevent accidentally comparing an interned string with a not-necessarily-interned string, which could lead to intermittent failures depending on usage patterns.>>
 
-TODO
+TODO 19.08.25 this topic was continued in files cbar.txt and nbor.txt
 
 3. Установление соединения (ассоциации).
 
@@ -2124,6 +2127,12 @@ TBD same for Address Family etc. Atom Names?
 
 старшие биты 10, т.к. невалидный utf8, для 18 7-битных символов,
 или 111110xx yyyyyyyy для идентфикатора однобайтной кодировки, 14 символов
+- 16.08.25 no, not codepages, Unicode compression from CBOR-TF7 or CBOR-GSM7
+  could be used here, with possible further modification that we don't need
+  C0/C1 controls, punctuation and similar, only lowercase is sufficient - so
+  only BMP is enough (there is no point in emoji or ancient scripts from SMP,
+  etc.), probably even before surrogates only
+  - see added nbor.txt, names are NSCU, VNCSU, UTF-VN...
 
 Reset Code 8, "Bad Service Code"
 
@@ -4786,6 +4795,7 @@ if granularity 2-3 bits (PacketCounter is not possible - very short)
 TBD just AND / shift - so performance? as Septinovile is usually for long ops anyway
 
 TBD use VarNibbles for non-full variants instead of bits complexitites
+- 18.08.25 or may be Golomb or Elias delta/gamma coding?
 
 TBD what about P on XS packets? on S size it possible just have another
 PacketCounter from server - reduced MSS in this direction, but XS may have no
@@ -4873,6 +4883,7 @@ TBD изменить формат, раз на диоде формат нече�
   12 - Not Yet Received
   13 - Not Received, but recovered by FEC
   14 - We under attack - duplicates with different ECN codepoints
+       TBD 26.08.25 is not a 100% indicator of attack
   15 - Reserved TBD or "AUTH failed" ? or report HMAC fail in ERROR opt?
 
 TBD or: just a count (0-3) for each codepoint? but how FEC then?
@@ -4881,6 +4892,7 @@ if 0/1/2=2 or more, then 3^4=81, 81*3=243 and 13 reserved values!
 TBD drop codes 8-11 for extension - time/PacketCounter, instead of PkCntWrap?
 - how to encode both values under 30 bits? or extend TIMESTAMP reply with next
   time/PacketCounter pair?
+- 26.08.25 DCCP Section 11.7 also have Drop Codes, incorporate them too
 
 TBD 26.10.24 ~6:00 moving average histogram of packet sizes on receiver - to
 report to sender for MTU change detection/recovery
@@ -4932,6 +4944,13 @@ RFC 3124 (Congestion Manager) - ownd, stream scheduler //move to QoS stream?
      |DupCn|Value Len| Something seriously wrong with this idea (!B) not continue
      +-+-+-+-+-+-+-+-+...
 --/02.12.24
+
+TBD 26.08.25 as "latest -> down" not necessary (see this day why DCCP had it),
+possible to do variable-based: e.g. +1 to timestamp, +1 to PktC, := to state,
+and Run Length e.g. could just repeat "counter++, state=..."; also think about
+sync - e.g. option to request Packet Vector from id N ?
+- reminds DWARF LNS, and it can become extensible to Packet Matrix, not just
+  Packet Vector here! Some initial setup and then VarNibbles for columns?
 
 
 4.20. FRAGMENT.
@@ -7350,6 +7369,9 @@ two nibbles <0 count> or bare 0 if it was just one zero in original, and
 then store additional bitmap: for every 0 in stream, bit 0 if it is bare 0
 and bit 1 if it is followed by count nibble
 * pro: it can also compress zeroes at ends of numbers
+  - 15.08.25 04:15 and it's quite possible in SKIP_BLOCKS because
+    Delta to next SSN is followed by nibble-sized Bitmap, so should consider
+    changing there from VarSextets to VarNibbles
 * con: worst case of alternating 0 and non-0 nibbles expands by bit per byte
   - may be mitigated by a flag in type byte (we anyway need to store length of
     bitmap) that is not compressed, so this will be better than 12.5% starting
@@ -7381,6 +7403,23 @@ and bit 1 if it is followed by count nibble
     type 8,9,a,b - 1..4 full 32-bit uncompressed follow
     type <11xx xxxx> = bitmap as above, then take N nibbles from stream of
     "padding" to make it whole number of integers
+- 14.08.25 if we are fine with shorter integers than uint32_t - 24 bit - then
+  a following scheme could be used: initial byte of chunk contains three
+  numbers, 6*6*6=216 - lengths of three following integers, 1 to 6 nibbles;
+  if we encoding very specific data, like a number could be:
+  * absolute
+  * plus delta
+  * minus delta
+  then root(65536, 5) =~ 9.18 i.e. 2 bytes for 5 integers some of which are
+  absolute and some deltas
+  - 04:46 this may not be combined directly but 6 nibbles could be "after
+    zero oad" and contain 0 inside, and 216+32 for bitmap
+  - 19.08.25 this continued in new added file nbor.txt, which covers
+    VarNibbles variants and CBOR-like encoding of what was originally intended
+    under name "CBAR" (until CBAR became just compression for CBOR)
+TBD 18.08.25
+https://arxiv.org/pdf/1209.2137v5 D. LEMIRE AND L. BOYTSOV
+"2.8. Patched coding" -- linked list of overflows and array of exceptions
 ===
 
 bytes?
@@ -7642,6 +7681,21 @@ just sender was quiet; this resembles same problem which FSN solves
    -> requires 5 more bits, this could be solved by 1 flag bit and putting it
       into low bits of PacketCounter when they are zero, and require to always
       reply by ECNE_CWR on such numbers 
+- TBD 23.08.25 holding array of counter size identificator may be expensive
+  for implementation, what if in instead of PkCntWrap write just difference
+  in time with previous packet? However, this will be problematic when two or
+  more consecutive packets were lost after quiet time
+  - is PkCntWrap needed at all? It's purpose is for ability to run-length
+    compress Packet Vector by viewing it as continuous sequence from most
+    recent packet back to past ignoring timestamp changes - but what if to
+    just change compression method? On very small packets sizes there is no
+    space for PkCntWrap anyway; also, do we really need to repeat DCCP and
+    QUIC in that first is the most recent received packet?
+    - 26.08.25 DCCP (in 4.2) states that due to unreliable semantics, there are
+      "no retransmissions, and having a TCP-style cumulative acknowledgement
+      field doesn't make sense" and thus "DCCP's Acknowledgement Number field
+      equals the greatest sequence number received, rather than the smallest"
+      sequence number not received.
 PkCntWrap is not needed in black mode
 
 seems that ECNE_CWR in this form is not needed - we already have SACK, so it
@@ -7900,6 +7954,8 @@ values instead of wasting bit
 - need frag number in NAK also?
 
 TBD study "Rapid Reset" HTTP/2 attack, invent countermeasures if applicable to us
+- 14.08.25 "MadeYouReset" attack is again consequence of architecture flaw of
+  stream per request instead of constantly-open streams
 
 TBD 29.06.25 load balancers: round-robin is bad for TCP performance, make us
 somehow resilient to misordered packets; another UDP port for each stream: is
@@ -7907,6 +7963,7 @@ it good or bad idea?
 - 16:15 for UDP ports seems idea bad
 - 19:45 try rule: when gap, if highest recvd TSN is not an End chunk, delay SACK
   reply by RTTvar of peer
+  - 25.07.25 08:45 need to include ACK delay field
 
 
 TODO

@@ -806,6 +806,12 @@ TBD what if use simple(0)..simple(15) for first atoms? so mb change varint to 24
   setup, that is, InternAtom/GetAtomName/ReleaseAtom
   - use VarNibbles record format there? differentiate CBAR and CBAP?
 
+19.08.15 original "CBAR" meaning, as reduced CBOR-like serialization format
+("Compact Binary Array/Record" with in fact arrays only), was later continued
+using VarNibbles and almost finished as "NBOR" (so not only array covered),
+see addded file nbor.txt - from now on in this file, CBAR is byte-wide
+compression scheme for CBOR
+
 === 15.12.24:
 
 This is proposed alternative to draft-cbor-packed as it's complete
@@ -2908,19 +2914,19 @@ Now let's create CBAPT function for it
            10(['lreverse', '@', 'fqdn']),     /on reversed label list/
       [ /inner foreach body/
         'if', ['is_cbor_uint', '$', 'label'], /reference instead of label?/
-	[ /if "then" body/
-	  'set', 'label', '$',                /to value of CBOR Pointer /
-	         ['atom-list',                /in 'atom-list' var: array/
-		              '$', 'label']   /index in 'label' in this case/
-	], ';'
+        [ /if "then" body/
+          'set', 'label', '$',                /to value of CBOR Pointer /
+                 ['atom-list',                /in 'atom-list' var: array/
+                              '$', 'label']   /index in 'label' in this case/
+        ], ';'
         'set', 'accum',              /set accum to string concatenation/
-	       10(['strconcat',      /of value of "label" variable converted/
-	            10(['to_tstr', '$', 'label']),  /to CBOR Major Type 3 /
-		    '$', 'accum'     /and previous value of "accum" var  /
-	          ]),
+               10(['strconcat',      /of value of "label" variable converted/
+                    10(['to_tstr', '$', 'label']),  /to CBOR Major Type 3 /
+                    '$', 'accum'     /and previous value of "accum" var  /
+                  ]),
         ';',                            /command separator (end of 'set') /
-	/now prepend value of "accum" variable to 'atom-list' array/
-	'unshift', 'atom-list', '$', 'accum' /TBD is 'linsert' more readable?/
+        /now prepend value of "accum" variable to 'atom-list' array/
+        'unshift', 'atom-list', '$', 'accum' /TBD is 'linsert' more readable?/
       ],
    ], ';'
    /*** NOTE TODO this lacks error-checking and suppression ***/
@@ -2936,24 +2942,24 @@ used in following way:
 
     10([simple(0),
         "foo",          /Atom 0/
-	'nc',           /call function and substitute it's return values/
-	[               /this will create 7 atoms/
+        'nc',           /call function and substitute it's return values/
+        [               /this will create 7 atoms/
           ["svc", "www", "example", "org"],
           ["datatracker", "ietf", 3]        /atom-list[3] is "org"/
         ],
-	"bar",          /Atom 8/
+        "bar",          /Atom 8/
         "baz",          /Atom 9/
         h' /CBAR rump/
-	  8F            /outer array/
-	  3D            /Atom 2: CwwwGexampleCorg/
-	  84            /inner array/
+          8F            /outer array/
+          3D            /Atom 2: CwwwGexampleCorg/
+          84            /inner array/
           1E            /Atom 1: CsvcCwwwGexampleCorg /
-	  5E            /Atom 5: KdatatrackerDietfCorg /
-	  18 2a         /42/
+          5E            /Atom 5: KdatatrackerDietfCorg /
+          18 2a         /42/
           1E            /Atom 1: CsvcCwwwGexampleCorg /
-	  1D            /Atom 0: Cfoo /
-	  9C            /Atom 8: Cbar /
-	  9D            /Atom 9: Cbaz /
+          1D            /Atom 0: Cfoo /
+          9C            /Atom 8: Cbar /
+          9D            /Atom 9: Cbaz /
   	'
     ])
 
@@ -3022,6 +3028,26 @@ zeroes may be also borrowed from GHC?
                 | append n bytes from CBAR input, starting s bytes
                 | to the left of the current output pointer;
                 | add this string as next atom to current dict
+
+
+TBD 22.08.25 in the style of Smalltalk, Tcl's "command subcommand ..." could
+be extended for e.g. number 3 accepting commands on it by a fallback to class
+"Number" if an exact "3" command is not registered, but if this is sufficient
+for elementary types, how to do that for real object instances? In Tcl/Tk
+itself it is simple, e.g. ".mainwind.frame1.button2" is enough as command
+because in Tcl everything is a string, but in CBOR we have types, so for
+blessed objects we'd rather put some reference to object - short enough, but
+which could be followed, blessed class determined and commands ("messages")
+allowed to be executed. This requires not only operators for taking references
+but most likely a special tag. Existing tags 28, 29 and 296 are for encoded
+data in CBOR as document (not a program), however, they are just implicit
+numbering - CBOR lacks YAML's anchors. Probably tag 94 (ASCII "^", for Pointer
+in Pascal, as other ASCII symbol numbers already taken in CBOR tags) can be
+used for this, giving anchor identifier, and Tag 29 to be extended for not
+only unsigned integers but such identifiers also. Note that Tag 32769 exists
+but named "External reference" so it is not clear where it could be reused for
+our *internal* references, but anyway, 32769 could be instead of 29, but
+actual "take reference / anchor name" still needed.
 
 
 TODO
