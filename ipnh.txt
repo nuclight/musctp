@@ -829,7 +829,7 @@ TODO
     As L3.5Len is distinct from IHL, the minimum MTU REQUIRED to be 576 bytes
     to be also possible to include maximal-sized Layer 3.5 part and some
     fragment bytes. Rationale to excluding L3.5Len from IHL is to allow 264
-    bytes of options on maximal sizes og NHL, SIL, DIL, SAL and DAL
+    bytes of options on maximal sizes of NHL, SIL, DIL, SAL and DAL
     (60+28+28+64+64=244), of which single long options block header will leave
     256 guaranteed bytes for option values.
 
@@ -894,11 +894,14 @@ TBD 20.11.24 ~02:20 NAIR - Nibbles/Nested Arrays of Integers Representation, lik
     if host has only one address (one provider for organization). Otherwise,
     it SHOULD be always included.
 
-    Valriable length for Host ID is intended for possibility of hierarchy:
+    Variable length for Host ID is intended for possibility of hierarchy:
     organization's ID, sub-organization(s) ID, host with organization ID. So
     with 32-bit values it is possible to have up to 6 organiztion levels (for
     support of merge/acquire, etc.). However, transport protocols should view
     IDs as just opaque bytestring.
+
+TBD 19.09.25 21:20 what if make it DNS label? Of course not arbitrary, but
+few non-fixed lengths labels under e.g. .hostid.arpa.
 
 TBD 03.11.24 put MTU into On-Path field when gets fragmented by router
 

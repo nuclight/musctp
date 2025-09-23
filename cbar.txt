@@ -2446,6 +2446,9 @@ import()/store() and macro arguments (see notes of previous day); see also
 		     `$subdocument = {"key1":1, "k2":[0, 1, $myvar, 3]}`
 		     ...this reminds Lisp quotes... but let's start that in
 		     new notes thread, this one is too indented
+                     - 31.08.25 that's matter of outer language (CBOR-TCL?)
+                       syntax, for 'process-cbor' just 10(['$']) enough, as we
+                       (CBAPT) are entirely about templating
                - 13.03.25 then need to alias '$' by other means so that
 		 dynamic dispatch [$cmd args...] still could work, or make it
 		 parsing exception (part of syntax) like '\' or ';'
@@ -2453,8 +2456,10 @@ import()/store() and macro arguments (see notes of previous day); see also
                    substitution ("{*}")
                - 15.03.25 03:20 btw, prohibit '\' in first position as it is
                  meaningless there?
+               - 31.08.25 what if just bool to 'parse-alias' - allow in first?
          - 16:00 what to do if '\' in scope of flattened form?
            - similar to ['ld', '$', var] problem: '$' must be unflattened first
+           - 31.08.25 similar to Lisp->infix and Smalltalk binary, see 22.08.25
     3) 23.02 01:40 Jim Tcl has [alias name args...] e.g.
        `alias e info exists; if {[e var]} { ...`
   - how to code recursion of scripts efficiently? in stack machine it's very
@@ -2616,7 +2621,7 @@ two classes of decoders, constrained and full, and even describe them in spec
 in separate chapters: so constrained has no local variables and is limited to
 VarInt start byte < 0xC0 and static template so can be decoded in-place; and
 full implementation may have IN_CODE state and named variables - 0xC0..CF be
-strings ("character"), and full implementation can affors to have hashtables
+strings ("character"), and full implementation can afford to have hashtables
 for maps. Then only thing to solve here is Path Array in Variable Tree: what
 if some level wants both array and map, e.g. 'var' and $1 ? In Tcl they just
 have maps (strings) always... CBOR maps allow to have distinct '1' and 1 keys,
@@ -2648,7 +2653,7 @@ to `jq` utility for needed features, so let's read it's manual and comment:
 - `indices`, `inside`, `endswith` and `startswith` are ad-hoc versions
 - `combinations` must not be supported: vector for DoS attack
 - same NOT for `repeat` etc.; `recurse` should be carefully thought if DoS
-- but `walk` looks more sane in thius regard
+- but `walk` looks more sane in this regard
 - `tojson` and `fromjson`: probably also need `tocbor` and `fromcbor` for
   between encoding and internal representation in variables; may be tags #6.63
   and 24 be done via this
@@ -2726,7 +2731,7 @@ to `jq` utility for needed features, so let's read it's manual and comment:
       * uint > 0: temporary variables between dictionary setup in constrained
 	implementations or some other temporary variables in *any* context,
 	e.g. Regexp capture groups or Shell's set -- $@/$*
-	- 15.03.25 23:59 but what with dictionary numbers -e.g. first arg to
+        - 15.03.25 23:59 but what with dictionary numbers - e.g. first arg to
 	  splice() ?
 	  - 01:00 scrolled text/notes, it wasn't worked through yet: at first
 	    splice() was acting in variables, of which all were disposed and
@@ -2738,7 +2743,7 @@ to `jq` utility for needed features, so let's read it's manual and comment:
 	    'get-atom' ('a') also was just separated from '$' without thinking
 	    of which dictionary is current... in fact, it was not quite needed
 	    until 27 Feb support for string variable names - variable tree in
-	    from of arrays-only was supposed for access to everything (just
+            form of arrays-only was supposed for access to everything (just
 	    assigning exact numbers in it was postponed). This is also tightly
 	    coupled with 'process-cbor' inner works: see 26.02.25 12:56 (and
 	    thread below) for separate (from CallFrame) dictionaries stack by
@@ -2796,6 +2801,11 @@ to `jq` utility for needed features, so let's read it's manual and comment:
   - 18.03.25 to avoid too many arguments to [proc], map may be used:
     "-static", "-doc" etc. keys; and think of somehow doing this generally
     instead of Tcl's -options?
+  - 31.08.25 type describing may be also needed for Smalltalk-style OOP: when
+    object is just a command, and if there is no particular command instance
+    registered like 'foreach', then a 'foranother' could invoke generic
+    handler for Major Type of strings, for example, or of specific tag; see
+    also at 22.08.25
 
 13.03.25 https://skarnet.org/software/execline/dieshdiedie.html
 will read nice and -10 from the argv, change the process' nice value, then exec into the command echo blah. This is called chain loading by some people, and Bernstein chaining by others.
@@ -3048,7 +3058,41 @@ only unsigned integers but such identifiers also. Note that Tag 32769 exists
 but named "External reference" so it is not clear where it could be reused for
 our *internal* references, but anyway, 32769 could be instead of 29, but
 actual "take reference / anchor name" still needed.
-
+- 29.08.25 Smalltalk also has unary/binary/keyword messages - this is partial
+  solution to "have common infix form instead of Lisp", which we mostly have
+  to solve in human wrapper language (name it CBOR-TCL?), but ['ld', '$', var]
+  problem, together with '\' exception, is also actual on lower level?
+- 31.08.25 see 07.03.25 16:30 and below about tag 21607: what if type
+  description (for [proc]s and not only) could also be make by *template* ?
+  E.g. 12345([1, 2, bstr]) as a real CBOR but where "bstr" is substituted with
+  some code? Somewhat like applying CBAR recursively to itself?
+- 01.09.25 19:00 note that "messages on objects" together with Table data type
+  sounds like a try to apply Erlang's lightweight-processes paradigm to objects
+  in kernel: a script quieries and sets rows in a connection tracking table
+  (conntrack), for example - without locks!
+- 03.09.25 16:00 no, due to security/safety, we won't go object way: it's more
+  safe to track potentiall harm centralized in a command than if it scattered
+  in methods of many objects (e.g. single "while" vs "loop/doTimes" methods on
+  numbers and other objects). The parsing theme of binary/unary/etc. messages
+  from Smalltalk still could be used to simplify human wrapper language
+  (reduce number of brackets), however, as well as command in form of reference
+  (tag 28?) could be used as object on which methods (subcommands) could be
+  called, to have OOP.
+- 05.09.25 14:10 references are harmful to multithreading: in Tcl, threads are
+  exchanging messages which can be code, but EIAS (Everything Is A String)
+  guarantees these are always serialized - we could change string to CBOR
+  subtree by "changing owbnership" of item to other thread, but this won't
+  work with shared data by references... Erlang also serializes everything,
+  but there it is simplier due to immutable variables
+  - TBD what if Tcl passes names of global vars? and package Thread also has
+    mutex, rwmutex, cond...
+- 20.09.25 need space in struct for weak references (or magic like Perl?)
+  uint32_t typeflags; uint32_t refcount;
+  SLIST_ENTRY next;
+  void *typedescr; // union with single tag?
+  SLIST_HEAD magic; //where to put GC list, if any?
+  uint64_t union double num_val; //cache of string representa
+  char[24] union array or map head
 
 TODO
 
