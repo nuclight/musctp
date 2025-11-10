@@ -902,6 +902,8 @@ TBD 20.11.24 ~02:20 NAIR - Nibbles/Nested Arrays of Integers Representation, lik
 
 TBD 19.09.25 21:20 what if make it DNS label? Of course not arbitrary, but
 few non-fixed lengths labels under e.g. .hostid.arpa.
+- 30.09.25 for privacy reasons, share 0-max with Connection Tag?
+  - or just use fake Host ID for each bunch of connections?
 
 TBD 03.11.24 put MTU into On-Path field when gets fragmented by router
 

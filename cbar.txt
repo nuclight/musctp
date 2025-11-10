@@ -2457,6 +2457,29 @@ import()/store() and macro arguments (see notes of previous day); see also
                - 15.03.25 03:20 btw, prohibit '\' in first position as it is
                  meaningless there?
                - 31.08.25 what if just bool to 'parse-alias' - allow in first?
+		 - 07.10.25 see this day: if we move flattening from generic
+                   parser to only simple(0) and 'proc' to be parsed by *them*
+                   only, then problems go away TBD XXX !B ERR
+                   - 09.10 well 10(";") may be escaped ';' a-la hardcoded var
+                   - 12.10.25 01:30 note we have problem mentioned at 02.02.25
+                     of atom definitions arguments (and type indication):
+                     10([simple(0), 'rgbValue', 10(h'C0'+"Red"), rump])
+                     MUST NOT be expanded before calling simple(0) command as
+                     these are arguments to be processed by simple(0) ! This
+                     reminds Lisp quoting
+                     - 02:00 last days ideas were in assumption we can unify
+                       'eval' with 'process-cbor' as in Lisp, but initially
+                       they were distinct for eval() to process 10([]) ONLY
+                       and nothing more: exactly for this... what if we need
+                       just some kind of preprocessor? which will also handle
+                       'parse-alias' and ';' and '\' etc.
+                       - yes, Common Lisp has reader macros (distinct from
+                         usual macros) and e.g. *readtable* variable; we don't
+                         need to really parse as we have CBOR, but CBAPT can
+                         enable ';'... preprocessor when it's package imported
+                         - 22:00 problem, but let's continue thread below
+                       - 05:42 simple(0) can accept optional half-float with
+                         package version - fixed exponent e.g. 3 bits minor?
          - 16:00 what to do if '\' in scope of flattened form?
            - similar to ['ld', '$', var] problem: '$' must be unflattened first
            - 31.08.25 similar to Lisp->infix and Smalltalk binary, see 22.08.25
@@ -3063,7 +3086,7 @@ actual "take reference / anchor name" still needed.
   to solve in human wrapper language (name it CBOR-TCL?), but ['ld', '$', var]
   problem, together with '\' exception, is also actual on lower level?
 - 31.08.25 see 07.03.25 16:30 and below about tag 21607: what if type
-  description (for [proc]s and not only) could also be make by *template* ?
+  description (for [proc]s and not only) could also be made by *template* ?
   E.g. 12345([1, 2, bstr]) as a real CBOR but where "bstr" is substituted with
   some code? Somewhat like applying CBAR recursively to itself?
 - 01.09.25 19:00 note that "messages on objects" together with Table data type
@@ -3078,10 +3101,19 @@ actual "take reference / anchor name" still needed.
   (reduce number of brackets), however, as well as command in form of reference
   (tag 28?) could be used as object on which methods (subcommands) could be
   called, to have OOP.
+  - 16.10.25 03:00 do we need to automatically convert e.g. string to number
+    for '+' operator/command or we need to provide e.g. "+casted"? Third
+    variant is for frontend to insert 10(["to_number", arg]) into each arg,
+    but this poorly works with CBAR/CBAPT where we need compact code due to
+    compression... though a macro may be? Otherwise, to define multiple types
+    for each operator is almost the same as operator overloading, even if it
+    will be special dispatch tables instead of classes... though /-arity in
+    Erlang (and some Lisp) for function by types looks appealing... but isn't
+    that also for higher front language, doable by macros in VM?
 - 05.09.25 14:10 references are harmful to multithreading: in Tcl, threads are
   exchanging messages which can be code, but EIAS (Everything Is A String)
   guarantees these are always serialized - we could change string to CBOR
-  subtree by "changing owbnership" of item to other thread, but this won't
+  subtree by "changing ownership" of item to other thread, but this won't
   work with shared data by references... Erlang also serializes everything,
   but there it is simplier due to immutable variables
   - TBD what if Tcl passes names of global vars? and package Thread also has
@@ -3090,9 +3122,577 @@ actual "take reference / anchor name" still needed.
   uint32_t typeflags; uint32_t refcount;
   SLIST_ENTRY next;
   void *typedescr; // union with single tag?
-  SLIST_HEAD magic; //where to put GC list, if any?
+  SLIST_HEAD magic; //where to put GC list, if any? bless?
   uint64_t union double num_val; //cache of string representa
   char[24] union array or map head
+  - 29.09.25 'parse-alias' problem if on parsed read-only copy
+    - 02.10.25 00:10 a CoW flag could be helpful, but how to mix copy-on-write
+      with that we have linked list of values, e.g. to copy part of array from
+      "readonly code" as a result?
+      - 00:15 if we move tags to "magic" like mbuf_tags, then we can get rid
+        of linked lists, like AV** - just need to solve this for maps
+      - 00:20 and "type-splitting" feature, easily doable from inner to outer
+        tags by cutting a sublist, is then not so easiliy doable
+      - 00:45 seems that raw decoding MUST *always* decode CBOR as-is - we
+        don't know how tags could modify meaning (e.g. 25/256), so processing
+        tags = transformation of parsed graph, possibly to C structs - must
+        be separate next pass. Why? Because here we can generalize maps to
+        tables: pointers in e.g. thmap(9) or plain hash always point to
+        special "table row" item, and when we have such structure, we can go
+        back and define CBOR tag for tables via out implementation!
+        - XXX thmap(9) does not allow walking and requires everything to be
+          thmap_del() first before thmap_destroy() or will leak
+          - 19.10.25 01:45 zfs_btree can though it badly documented (and can
+            crash on some, see btree_test.c), basically, it copies inside the
+            entire single-size-for-all "value" and can relocate it, so we need
+            to make that "value" a `struct { cbor_value_t *key, *value }` and
+            it gets passed as void* to compare function which will need to
+            take just *key and compare two items; on find/next/prev/last it's
+            better to copy out *value - mutating pointers (which returned to
+            internal btree's area) is not always safe
+            - 02:35 connection tuples ip:port do not require ordering, so
+              thmap may still be needed for better performance - no need to
+              rebalance (though it's also tree inside, need to bench)
+            - 03:10 zfs_btree compare function accepts only two arguments (and
+              no closures in C), so need to put table header ptr into "value"
+              (not enough space in item itself)
+        - 06.10.25 23:20 but do we really have to eval what was raw-decoded
+          first? The goal of such was some performance gain to not repeat
+          parsing on repeated calls, but does it contradict? How do Lisps
+          solve it? Or even C code calling Perl hooks - just look at irssi?
+          - 07.10 00:40 in fact, the problem here that parsing is non-static
+            but 'parse-alias' needed only in constrained/compression cases:
+            what if just make it processed by `simple(0)` command? and '\' too
+            and ';' also, in generic let it be 'progn'? or mb in 'proc' too
+            - 01:30 also '$', but '$' is single-argument so could be
+              hard-coded - we can make some permanent like ' or ` in Lisp
+            - 01:45 BTW generating C code from CBOR in separate process will
+              also be easier if not affected by volatile 'parse-alias'
+            - 02:10 but if 'eval' processes every '$' then need '\' escape again
+              - can be solved by 10(['$', var, path, ...]) and by 10(tstr) for
+                single symbols: the former is generic and the latter matches
+                using by 'process-cbor' in templates - so '$', ';' and '\' are
+                for shortcuts in CBAR/CBAPT only and could be further reduced
+                by 1 byte utilizing simple(12), simple(13) etc.
+                - BTW with '@' 4 simples not enough: evidence for RFCregsimples
+        - 12.10.25 16:30 no (see also this day), we better have reader macros
+          which also parses many other tags to C structs (whatever is added),
+          so parsed representation is always simple and native - tables BTW are
+          also will be done by such tag parser (we could think about it with
+          imaginary implementation first, not real); however this shifts the
+          burden of complexity to 'compile' feature - how our secondary process
+          will read parsed data from memory now, void* vs offsets problem?
+          However, it's inevitable: compiler must know about C struct types
+          anyway to properly compile it. Again the address space problem, for
+          kernel we can kvm_read() but what in userland? Restricting arena is
+          good for overall safety goals (and inter-thread and IPC) but requires
+          too much effort for custom allocator (thmap(9) can but it has small
+          footprint) while auxiliary things like mbuf_tags will require
+          arbitrary pointers anyway... From performance point of view, direct
+          pointers are slightly better than addition (though this negligible),
+          so what to do? Re-serialize it back to CBOR with private tags when
+          sending to compiler?
+          - 18:30 BTW a C struct in item will require accessors, for example,
+            if presented as map/hash then keys, each, get/set... seems need to
+            look like tie() in Perl
+            - 15.10.25 22:00 for tables, to be able to have them optimized in
+              compiled form and thus unchangeable structure, need to have an
+              unique type identificator, which compiled module will posess,
+              and this also leads to TWO tags for tables: definition and
+              actual body (which perfectly match SQL DDL and DML)
+              - 03.11.25 actually may be done by single tag: first is either
+                uint so then instance data follows, or not, then it's
+                definition, and may be combined for inline definition+data
+          - 22:00 problem: CBOR may be decoded all at once and passed to eval()
+            but e.g. if simple(0) rump is not bstr, then processing complex arg
+            in recursion may be not possible yet without info on first executing
+            some commands
+            - 14.10.25 02:00 solution: instead of reader macros (or in addition
+              to them) have a "tag macro": by default, Tag 10 will be evaluated
+              as in Lisp/Tcl, command and args, but CBAPT macro will now handle
+              all those ';' and '$' and 'parse-alias': in Lisp, result of
+              "macroexpand" is evaluated - and so will do we. Need to add some
+              cache for macro expansion results, both for performance and to
+              pass expanded form to compiler to simplify it (plain AST)
+              - 19:05 for generic cache need to see on which vars macro depends
+                and then something like Tcl's variable trace?
+              - 22:30 the simple Lisp mechanism of linking current environment
+                to closure will lead to leak of unused variables - so need to
+                add explicit "capture" variable list - we are not comfortable
+                language but high-level assembler anyway...
+      - 09:30 what if using thmap(9) in SQLite4-style - everything in a single
+        tree? or at least [row][column] number keys in table?
+      - 15:17 so a table body is array of row items and each row item is array
+        of columns, need to think where to keep index heads/bodies, and in
+        each item need "owner" reference - for doing RB_REINSERT() or
+        hash/thmap del/insert on table updates; 0-1 size maps could be done
+        just by a single key/value pointers in 24-space (like 0-3 arrays)
+        - 18.10 better have 0-2 maps in 32-space and use same code for small
+          maps (e.g. 10 entries) with linear searching when zfs_btree/thmap
+          overhead is too big
+        - 19.10.25 03:10 see zfs_btree comment at this time - have we space?
+        - 19.10.25 03:30 having "owner" reference somewhat contradicts with
+          CoW problem, see 29.09.25 and 02.10.25; BTW when we have just ptrs
+          (no linked list) it's easy to have "atom interning" to keep repeated
+          strings (often in map keys, and the entire idea of CBAR) in separate
+          items living in a global per-arena thmap (see also Tag 280 Symbol)
+        - 03:57 a possible solution is to *always* have linear AV** (18.10.25)
+          with key/value pairs for thmap to be just index to these... though
+          it is inefficient when searching gaps after delete, and if do linked
+          lists, then this degenerates to just very usual hashtable with bucket
+          as head of linked list... I need Judy tree :(
+	  - 04:26 well, filing https://github.com/rmind/thmap/issues/15 I see
+            that probably I still need it - for the "foreach" operation on map
+          - 04:35 what if delete a row from table? same problem? so linked list
+            of table rows, and hash also has table rows when thmap/zfs_btree?
+            - 05:30 so much overhead... what about different item sizes? e.g.
+              in 16-byte paragraphs (jemalloc quantum), and so tags could be
+              made distinct (easier for CBOR Pointer and splitting)... but now
+              cache-lines false-sharing is possible...
+              - 20.10 table row for doubly-linked list, pointer to owner table,
+                at least two columns and typedescr (if entry is a C struct) is
+                already 56 bytes, no gain to decrease from 64 here - don't
+                need magic so 3 columns can fit. Also, idea about row-level
+                table-locking: what if reuse atomic refcount field in row for
+                this? As in wiki:HAMT persistent/software transactional memory
+                would be ideal for SQL-like operations UPDATE and restart if
+                other thread modified, or have a queue of updates to table
+                - 22.10.25 00:26 but do we need it all? in PBMFS may be (though
+                  VCS-like commits are lockless by definition), but in firewall
+                  may be simply have 1000 "shards"-threads, and non-owning
+                  thread just passes msg to owning thread (see diary this days,
+                  short, that's not my carmic or had experience already)
+                  - 25.10 19:40 this means we don't need thmap to get better
+                    performance without atomics - just take e.g. pctrie (it
+                    also has lookup_le() and lookup_ge() methods), and note
+                    that for areas like eBPF checking syscall params we still
+                    need to have arbitrary pointers, so thmap's idea of area
+                    from offset is, alas, inapplicable. But we can have
+                    statistics counter to limit arena size and have functions
+                    like e.g. malloc_debt(int) for temporary reallocations or
+                    something other for softlimits/CoW
+                    - 22:00 pctrie panics in some conditions (e.g. on duplicate
+                      insert) and needs to store key in value-struct, so for
+                      hash probably need to use 32 bits as high word and
+                      duplicate counter in low word then do pctrie_lookup_ge()
+                      for walking collisions (this limits to 2^32), but for
+                      usual CBOR maps pctrie value can be inside table row and
+                      thus no array of rows (if ordered was not required)
+              - 21.10.25 02:50 to "break" and "continue" return codes add also
+                "defer" for green threads scheduling
+              - 24.10.25 02:00 yes, let's have as in Perl, see this day below
+      - 16:15 if we have "owner", can we have "single refcount" flag on owners
+        of hierarchy to re-hook subtree to e.g. different thread?
+        - 07.10 also add flag to limit max string allocated size: in generated
+          C code, this could be char buf[size] on stack
+      - 12.10.25 22:50 reference counting GC can suffer performance from problem
+        "we trash cache lines for things we'll not need anymore", but that's
+        minor problem compared to circular references due programmer's errors:
+        need a way to still free if such a leak occurs - so still arena with
+        custom allocator?
+  - 01.10.25 22:30 we don't have to waste space for "bless" in every value:
+    as we're low-level AST, every imaginable form of OOP could be implemented
+    by appropriate commands
+- 16.10.25 03:00 if we often run "new" programs with somewhat "prepared"
+  interpeter but otherwise "fresh" from program's point of view, do we need to
+  somehow "snapshot" interpreter state (and arena) for performance? or that
+  should be like FastCGI's preparation and then loop? Here are some security
+  concerns - of what is preload into "image" and what (untrusted) program then
+  allowed to load from packages
+  - 30.10.25 22:00 possible solution: have a separate "arena", or even a stack
+    of arenas - allocation is from current arena only, probably need to mark
+    other arenas as readonly; at the end of such program smth like pop_arena()
+    is done, or may be just arena_clear() to have it ready for next invocation.
+    Problem here is to track allocations: neither UMA nor jemalloc() have API
+    to iterate all items in zone - probably need constructor and destructor to
+    keep item adresses in a tree - performance penalty... Another problem is
+    "shadowing" global variables to undo their changes; reminds environments
+    of closures and dynamic scoping "stacking"
+    - 22:30 probably also need to map from item to arena it belongs, so simple
+      solution to partially do slab allocator: a page (4096) with arena
+      pointer, LIST, bitmap and 126 items - then if allocating aligned, get
+      by simply masking low 12 bits
+- 24.10.25 02:00 so, let's split: have item heads and bodies when needed.
+  Head 32 bytes struct {
+    uint32_t typeflags; uint32_t refcount;
+    union {
+      struct {
+        union { // 2 bits in flags: type, or tag, or in magic when both set
+          void *typedescr;
+          uint64_t single_tag;
+          SLIST_HEAD magic;
+        };
+        union {
+          char short_type_data[16]; //client C type's structure here
+          uint64_t uint_val;
+          int64_t sint_val;
+          double num_val;
+          __i128 val128; //if compiler supports, for 65 bits or short bignums
+          cborvm_item_t *reference_val;
+	  struct {
+	    cborvm_item_t** am_values; //contiguous area
+	    uint32_t        am_size;   //of allocated area
+	    int32_t         am_fill;   //Index of last element present
+	    //TBD mb 16 bit? for chopped beginning; reallocating contiguous
+	    //64K+ area is not effective, better a tree
+	  } array_medium_size;
+	  struct { //0 or 1 entries
+	    cborvm_item_t *key, *value;
+	  } tiny_map;
+	  struct cborvm_table_header_t *th;
+	  struct big_array *ba; //TODO as radix tree when AV** too large
+	                        //or extents from PBMFS
+	  struct {
+	    char *ms_string;
+	    uint32_t ms_cur;  //current length
+	    uint32_t ms_size; //allocated area
+	  } medium_string;
+	  struct *string_list; //TODO indefinite-length and big strings (rope?)
+	};
+      }
+      char short_string[24];
+    }
+  } cborvm_item_t;
+  And table row 32 bytes struct {
+    cborvm_item_t *parent; //so zfs_btree cb can find data by type in cmp
+    union {
+      void *auxiliary;    //helper if client C struct type needs it
+      uint64_t pctrie_val;
+    };
+    union {
+      cborvm_item_t *keyval[2]; //common case for maps
+      struct {
+        cborvm_item_t **columns; //more than two - external array
+        void *client_data;       //when (part of) row is client C type
+      } data;
+    }
+  } cborvm_trow_t;
+  This means ALTER TABLE at runtime is not supported: table row could be done
+  as item, with typeflags etc. to be extensible, but this would mean too much
+  overhead for typical case when just a key/value map, not 3+ columns table;
+  also there is no doubly-linked list for implementing map as hash: table
+  header has cborvm_item_t** like usual array and separate index, e.g. thmap
+  (which has no iteration API so client must keep e.g. doubly-linked list to
+  be able to delete individual nodes or entire hash), so overhead per key/value
+  pair is 40 bytes instead of 48; need to calculate threshold when thmap or
+  zfs_btree overhead; also need custom hashes for e.g. conntrack C struct case
+- 24.10.25 04:00 given the CBOR Pointer draft, we probably don't need new
+  Tag 94: our function "$" means "get value of variable" and it should be
+  changed to CBOR Pointer for most common version, and next we can just have
+  e.g. 10["$^", "varname", ["key1", 2]] as analog of '\$' in Perl returning
+  29(-0x123456789) reference, and 10(["$@", reference]) to dereference, e.g.
+  10(["$@", 10(["$", "var_with_ref"])])
+  - why tag 29 at all? let's use it only for debug, but references must be
+    internal to implemenatation, otherwise crafted code could crash or leak
+    pointers to network; so constructed 29 won't work and in debug dump
+    commands it's EDN should not be accessible to production code
+    - 10.11.25 15:30 possible solution to make references 16-byte strings,
+      encrypted by interpreter's unique key; this allows re-parsing in same
+      interpreter
+  - 04.11 what if "assoc.retrans.max" in muSCTP be just namespaced variable in
+    interpreter? That is, for input in internal config stream not just atoms
+    and sesctl variable tree, but full-fledged RPC / language input, of which
+    variable query/set be just part, utilizing CBOR Pointer?
+
+
+TBD 12.10.25 Clojure has syntax (hash-set :a :b :c)     ; ⇒ #{:a :b :c}
+so a possible punctuation for sets in higher-level front-end language
+
+TBD 28.10.25 GnuCOBOL docs:
+[ [ DEFAULT ROUNDED MODE IS { AWAY-FROM-ZERO } ] ]
+[ [ ~~~~~~~ ~~~~~~~ { NEAREST-AWAY-FROM-ZERO } ] ]
+[ [ { NEAREST-EVEN } ] ]
+[ [ { NEAREST-TOWARDS-ZERO } ] ]
+[ [ { PROHIBITED } ] ]
+[ [ { TOWARDS-GREATER } ] ]
+[ [ { TOWARDS-LESSER } ] ]
+[ [ { TRUNCATION }.]
+
+The INITIAL clause, if specified, guarantees the subprogram will be in its initial
+(i.e. compiled) state each and every time it is executed, not just the first time.
+
+
+TBD 07.11.25 about implementation. A capable constrained machine with sizeof
+pointer == 2 bytes could use linked lists of 8-byte structures:
+struct cbor8_item_t {
+  uint8_t type;
+  uint8_t refcount;   /* or another memory management */
+  cbor8_item_t *next; /* in list of parent */
+  union {
+    uint32_t uint4;
+    int32_t int4;
+    float fp32;
+    struct strs {  /* string somewhere in memory */
+      char* str;
+      uint16_t len;
+    };
+    struct arr_map {
+      cbor8_item_t *child;
+      uint16_t count;
+    };
+}
+but this is 8-byte - for machines with dozens of Kb, though simple to
+understand CBAR. More constrained can take conceptual path from paper
+https://raw.githubusercontent.com/Robert-van-Engelen/tinylisp/main/tinylisp.pdf
+so how NaN-boxing for constrained implementations on 4-byte floats could look
+with both pointer and value 10 bits each:
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |S|Exponent = 255 |1|Typ|    Next Pointer   |      Value        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+ S|Typ = CBOR MT:
+ -+--
+ 0 00 - positive int
+ 0 01 - negative int
+ 0 10 - bstr
+ 0 11 - tstr
+ 1 00 - array: value is pointer to child
+ 1 01 - map: value is pointer to child
+ 1 10 - tag
+ 1 11 - special: 0-255 are simple values, others for interpreter
+
+For ints/tags, Value is further distinguished by 2 high bits and 8 bits:
+00 - 8-bit value inline as-is
+01 - index in 2 bytes table
+10 - index in 4 bytes table
+11 - index in 8 bytes table
+For strings, entire value is index into the atom table, though it's not only
+atoms, but may point also into middle of other strings (e.g. CBOR document
+being parsed and unpacked)
+- 01:45 no, with NaN-boxing we just always waste 9 bits, let floats be in data
+  area and format of cell to be (high T bit of value for subtype in some types):
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   | Type  |Twelve, usually nextPtr|T.  Sixteen, usually Value     |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    0000 -  nextPtr = cell index    uint inline
+    0001 -  nextPtr = cell index    0 pointer to 4 byte uint
+    0001 -  nextPtr = cell index    1 pointer to 8 byte uint
+    0010 -  nextPtr = cell index    nint inline
+    0011 -  nextPtr = cell index    0 pointer to 4 byte nint
+    0011 -  nextPtr = cell index    1 pointer to 8 byte nint
+    0100 -  nextPtr = cell index    bstr: cell index
+    0101 -  nextPtr = cell index    indef-len bstr: first child cell index
+    0110 -  nextPtr = cell index    tstr: cell index
+    0111 -  nextPtr = cell index    indef-len tstr: first child cell index
+    1000 -  nextPtr = cell index    array: first child cell index
+    1001 -  nextPtr = cell index    fp16 inline
+    1010 -  nextPtr = cell index    map: first child cell index
+    1011 -  nextPtr = cell index    0 pointer to float32
+    1011 -  nextPtr = cell index    1 pointer to double
+    1100 -  nextPtr = cell index    tag inline
+    1101 -  nextPtr = cell index    0 pointer to 4 byte tag
+    1101 -  nextPtr = cell index    1 pointer to 8 byte tag
+    1110 -  nextPtr = cell index    special & simple values
+    1111 -  string length           T? + pointer to beginning of string
+
+Here, strings require two cells: one (0xF) is independent actual string
+descriptor - pointer and length, untyped. Cells in CBOR representation have
+that cell's index in their value field. The very first cell (highest SP)
+belong to independent list with all atoms, or there may be two such lists, one
+for pre-setup atoms and other for CBAR (or more, somewhere we have list of
+"globals", probably *that* would be first and string list it's first child).
+Strings which consist of several atoms and indefinite-length strings from
+parsed CBOR are represented just like array/maps - with child linked lists.
+This format requires long numbers to be in first 32768 bytes (and for atoms
+too, if T bit for bstr/tstr is used) and limits to max 4096 cells (16K) which
+gives 48K or 80K max supported memory.
+Here, garbage collection is possible only in a way described in paper:
+adjusting stack and heap pointers - so this prohibits from having persistent
+variables between packets. While this is in principle possible with memmove()
+and refcounts, this intervenes with memory allocator so may be hard to do as it
+varies depending on device and OS. Therefore, this non-normative implementation
+approach serves as a model for decisions of what to be included in constrained
+subset of CBAPT.
+- 19:00 for more limited machines (1 Kb for heap) we still can try NaN-boxing
+  where S is for strings:
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |S|Exponent = 255 |1|Typ|    Next Pointer   |      Value        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+ S|Typ:
+ -+--
+ 0 00 - array: value is first child cell index
+ 0 01 - map: value is first child cell index
+ 0 10 - value is pointer to CBOR element or S=1 cell
+ 0 11 - inline integers, two bits + uint8_t
+        00 - uint
+	01 - nint
+	10 - tag
+	11 - simple values, 24-32 reserved for interpreter
+ 1 00 - indefinite-len bstr: value is first child cell index
+ 1 01 - indefinite-len tstr: value is first child cell index
+Note here Typ=0b10 points to any scalar CBOR element, that is, to 5 bytes
+0x1a 01 02 03 04 for 0x01020304 or to 0x63666f6f for tstr "foo". This works
+for elementary strings in CBOR document (or pre-added at start), but for CBAR
+need to have separate string descriptor:
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |1|Exponent = 255 |1|1|T| Pointer to string |   String length   |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+Bit T may be used to indicate bstr or tstr.
+As pointer to CBOR element or S=1 cell must fit in 10 bits, this limits total
+memory to 1 Kb for both heap and cell stack.
+- 19:40 there is global error here: floating point values don't have nextPtr!
+  if only tinyLisp approach with half floats, but just 10 bits for fraction
+  and must be qNaN with first bit... though still have sign
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |S|Exponent |1|     Value       |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+S=0 - Value is Heap pointer, 9 bits
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |1|Exponent |1|0|  Cell Index   |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |1|Exponent |1|1 0|  Specials   |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |1|Exponent |1|1 1 0|String len |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+List entry consists of 2 or 3 cells: last is always "Cell Index" being
+next pointer, first may be:
+
+* Heap pointer - to CBOR element
+* String length - this is an atom, then 2-nd element is Heap pointer to string
+  start, and only 3-rd is Next Pointer
+* Specials: subset of scalar single-byte CBOR values, and if map/array, then
+  2-nd element is Cell Index - pointer to child list, 3-rd is Next Pointer
+
+This format allows only 512 bytes of heap memory with max 256 cells (512
+bytes), for 1 Kb total, limiting atom length to 64 bytes (zero meaning 1 byte)
+- 22:00 may be merge Cell Index and Specials to Ordinal?
+  - 23:00 no, this won't allow to distinguish - can't have strings in one
+    global table so overhead is not 6 bytes; again same problem - exponent
+    eats too many bits
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |0|String Len |  Heap Pointer   |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |1 0|   Type    |    uint8_t    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |1 1| PtrType |  Heap Pointer   |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+...this has too many bits for types while too few for heap pointer and string
+length (512 acceptable, but want more)
+
+ptr to cell = 3 * cell index; 1024 cells max
+
+    0                   1                   2
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |Type ...     Value         |NextPtr: Cell Index|
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    0 0 value is Heap pointer to CBOR element, 12 bits
+    0 1 0 Specials: inline element
+    1 * * * value is reference to other cell index:
+    1 0 0 0 to array first child cell
+    1 0 0 1 to map first child cell
+    1 0 1 0 to indefinite-len bstr
+    1 0 1 1 to indefinite-len tstr
+    1 1 0 0 to just a string (atom)
+    1 1 * * interpretator-reserved
+
+    0                   1                   2
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |0 1 1|  String Length  |     Heap Pointer      |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+- 09.11.25 03:00 ...but who will implement 3-byte entries? e.g. which compiler
+  will support such bit unions in structures to be able to cast? Moreover, in
+  version from 01:45 yesterday is error: global list of (atom) strings was not
+  counted, this will give 12 bytes total for singleton string: 4 for
+  next/value pair in atom list, 4 for string descriptor and 4 in particular
+  list entry
+- 04:30 probable way is to define "conspair" of two 2-byte values and
+  "constriple" of three, this will be used in atom list for string length and
+  pointer, and in maps for key/value: thus 6 bytes for key/value pair, not 8
+    0                   1
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   | Type  |      Ordinal          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     str ptr
+     str len
+     map key
+     map value
+     CBOR elem Heap Ptr
+     Cell Index - references and "next" (nil = 0)
+     map head
+     array head
+     indefinite-len bstr head
+     indefinite-len tstr head
+     small inline CBOR
+        0 ...
+	1 MjTyp contents of second byte if first had ai=24
+- 18:40 this has problem: to be inline, map key has to be *further* divided to
+  value or pointer to cell or to heap etc.
+- 18:47 solvable if we change order: next pointer encodes what follows after
+  it (or may be up/down stack order), 2 or 3 elements
+  * nextPtr of pair
+  * nextPtr of triple
+  * str ptr
+  * str len
+  * CBOR elem Heap Ptr
+  * small inline CBOR
+  * Cell Reference
+  * map head
+  * array head
+  * indefinite-len bstr head
+  * indefinite-len tstr head
+- 10.11 01:30 str ptr and CBOR elem ptr could be combined - distinguish by
+  length presence, discard inline CBOR - always point to heap; this means to
+  tags also - so that map entries always point to either CBOR or atom cell
+  - 02:00 it's then problem to have "foobar" atom and 7("foobar") if it is not
+    present in CBOR but e.g. 7(10(2))
+- 02:30 still too much overhead... seems constrained implementations, like
+  nanocbor, use streaming approach, not parsing to lists
+- 04:00 thus need just list of two pointers: next and child list or CBOR
+  element - those will be atoms or variables; effectively this prohibits
+  generation like "concat" in "foreach" because where to store generated?
+  - may be doable if it's again "cell" so two bits of "next" available for
+    type: atom, list, generated value - free() it later; but still requires
+    memory (and allocator)
+
+
+TBD 10.11.25 https://gist.github.com/kriszyp/b623b85d2dc25ac9e3b07d8f39df9307
+compares cbor-packed with records tags and and with gzip, where says that
+"generally is about 2-4x slower with gzipping" - a serious reason for CBAPT on
+non-constrained machines
+
+
+
 
 TODO
 
