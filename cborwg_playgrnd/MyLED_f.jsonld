@@ -1,0 +1,96 @@
+let a = {
+    "name": "MyLED",
+    "interactions": [{
+        "links": [{
+            "href": "http://192.168.1.103:8445/wot/thing/MyLED/rgbValueRed",
+            "mediaType": "application/json"
+        }],
+        "outputData": { "valueType": { "type": "number" } },
+        "name": "rgbValueRed",
+        "writable": true,
+        "@type": ["Property"]
+    }, {
+        "links": [{
+            "href": "http://192.168.1.103:8445/wot/thing/MyLED/rgbValueGreen",
+            "mediaType": "application/json"
+        }],
+        "outputData": { "valueType": { "type": "number" } },
+        "name": "rgbValueGreen",
+        "writable": true,
+        "@type": ["Property"]
+    }, {
+        "links": [{
+            "href": "http://192.168.1.103:8445/wot/thing/MyLED/rgbValueBlue",
+            "mediaType": "application/json"
+        }],
+        "outputData": { "valueType": { "type": "number" } },
+        "name": "rgbValueBlue",
+        "writable": true,
+        "@type": ["Property"]
+    }, {
+        "links": [{
+            "href": "http://192.168.1.103:8445/wot/thing/MyLED/rgbValueWhite",
+            "mediaType": "application/json"
+        }],
+        "outputData": { "valueType": { "type": "number" } },
+        "name": "rgbValueWhite",
+        "writable": true,
+        "@type": ["Property"]
+    }, {
+        "links": [{
+            "href": "http://192.168.1.103:8445/wot/thing/MyLED/ledOnOff",
+            "mediaType": "application/json"
+        }],
+        "outputData": { "valueType": { "type": "boolean" } },
+        "name": "ledOnOff",
+        "writable": true,
+        "@type": ["Property"]
+    }, {
+        "links": [{
+            "href": "http://192.168.1.103:8445/wot/thing/MyLED/colorTemperatureChanged",
+            "mediaType": "application/json"
+        }],
+        "outputData": { "valueType": { "type": "number" } },
+        "name": "colorTemperatureChanged",
+        "@type": ["Event"]
+    }],
+    "@type": "Lamp",
+    "id": "0",
+    "base": "http://192.168.1.103:8445/wot/thing",
+    "@context": "http://192.168.1.102:8444/wot/w3c-wot-td-context.jsonld"
+}
+
+ 1113([/*shared*/["name", "@type", "links", "href", "mediaType",
+               /*  0       1       2        3         4 */
+       "application/json", "outputData", {"valueType": {"type":
+            /*  5               6               7 */
+       "number"}}, ["Property"], "writable", "valueType", "type"],
+                  /*   8            9           10           11 */
+      /argument/ ["http://192.168.1.10", 6("3:8445/wot/thing"),
+                /* 6                        225 */
+      225("/MyLED/"), 226("rgbValue"), "rgbValue",
+       /* 226             227           228     */
+      {simple(6): simple(7), simple(9): true, simple(1): simple(8)}],
+        /* 229 */
+      /rump/ {simple(0): "MyLED",
+              "interactions": [
+      229({simple(2): [{simple(3): 227("Red"), simple(4): simple(5)}],
+       simple(0): 228("Red")}),
+      229({simple(2): [{simple(3): 227("Green"), simple(4): simple(5)}],
+       simple(0): 228("Green")}),
+      229({simple(2): [{simple(3): 227("Blue"), simple(4): simple(5)}],
+       simple(0): 228("Blue")}),
+      229({simple(2): [{simple(3): 227("White"), simple(4): simple(5)}],
+       simple(0): "rgbValueWhite"}),
+      {simple(2): [{simple(3): 226("ledOnOff"), simple(4): simple(5)}],
+       simple(6): {simple(10): {simple(11): "boolean"}}, simple(0):
+       "ledOnOff", simple(9): true, simple(1): simple(8)},
+      {simple(2): [{simple(3): 226("colorTemperatureChanged"),
+       simple(4): simple(5)}], simple(6): simple(7), simple(0):
+       "colorTemperatureChanged", simple(1): ["Event"]}],
+        simple(1): "Lamp", "id": "0", "base": 225(""),
+        "@context": 6("2:8444/wot/w3c-wot-td-context.jsonld")}])
+
+here simple(6): simple(7) could be merged into single #6.63
+{simple(10): {simple(11): "boolean"} -- used just once
+

@@ -1,0 +1,387 @@
+footer: CBOR 2025-01-22 • Vadim Goncharov <vadimnuclight@gmail.com>
+slidenumbers: true
+theme: work, 1
+autoscale: true
+slide-dividers: #
+
+# First some history of CBAR
+
+Heraclitus — 'War is father of all things'
+
+## 1969, DARPA: Internet was created for functioning in a nuclear war.
+
+### - this exact goal was not achieved, but result was very useful nevertheless
+
+## Want to innovate in "peaceful" things? Try to solve "warful" problems
+
+
+
+
+# muSCTP: Multiflow Unsymmetric Sessionful Concise Tunneled Protocol
+
+[.column]
+Ranging network protocols (boundaries really are blurred) by upper scale:
+
+```
+   Very      . Low end     . Middle    . Higher   .   Very      . Ultra High
+constrained  .             . (today)   . end      . Highload    . (future)
+             .             .           .          .             .
+IoT/Embedded . older hw    . casual    . low-end  . Big DC      .
+             . and sw,     . user's    . servers, . servers,    .
+             . future      . desktop   . VMs      . HPC clus-   .
+             . embedded    .           .          . ters        .
+             .             .           .          .             .
+< 1 Mbps,    . 10-100 Mbps . 1 Gbps,   . 10 Gbps, . 40-800 Gbps . > 8 Tbps
+MTU 60-128   . IPv4        . IPv4/IPv6 . IPv4/6   . IPv6/custom .
+Bytes        \__ MTU 576-1500 Bytes __/ \_ MTU 1500-9000 Bytes _/
+             .             .           .          .             .
+|<------ CoAP ------>|     .           .          .             .
+             .             .           .          .             .
+          |<----------------------- TCP ----------------------->|
+             .             .           .          .             .
+       |<------------------------ muSCTP ------------------------>|
+             .             .           .          .             .
+             .   |<--------------------- SCTP --------------------->|
+             .             .           .          .             .
+             .     |<--------------------- DCCP --------------------->|
+             .             .           .          .             .
+             .         |<-------------------- QUIC -------------------->|
+             .             .           .          .             .
+|<-------x-----x--- custom protocols per task / field ---x--------x------->|
+```
+
+[.column]
+### Message-oriented transport and session protocol suitable for IoT and censorship circumventing
+
+# muSCTP
+
+* peaceful: designed to be able to work in 33-byte UDP payload - IEEE 802.15.4 / 6LoWPAN
+
+* or not so: in some east Great Draconian Firewall country...
+```
+PING 192.168.0.1 (192.168.0.1): 56 data bytes
+64 bytes from 192.168.0.1: icmp_seq=0 ttl=64 time=0.278 ms
+64 bytes from 192.168.0.1: icmp_seq=1 ttl=64 time=0.275 ms
+64 bytes from 192.168.0.1: icmp_seq=2 ttl=64 time=0.284 ms
+64 bytes from 192.168.0.1: icmp_seq=3 ttl=64 time=0.271 ms
+```
+- your mail/instant messaging inside those pings!
+
+## Two sides, two purposes - one same way: solve working in constrained envirronments
+
+- e.g. packets of very small size: 24 byte non-header area (3 Blowfish blocks)
+
+
+
+
+# muSCTP: features
+
+## - to be used instead of TCP/TLS/DTLS
+
+* OSI Layer 4 (Transport) and Layer 5 (Session) protocol
+* Multiplexes several streams inside one association ("connection", in TCP terms), while eliminating so called "Head-of-Line Blocking" (HoL)
+* Generalizing traditional "Layer 3 is IP or IPv6 packet" to _tunneling over arbitrary protocols_ (UDP being just the simplest case)
+ - dispatch byte "not a LoWPAN" and you have 90 bytes directly over Layer2 !
+* Encryption/MAC is per-packet (IPsec) style
+* Up to 1024 concurrent streams:
+ - structured ordered messages
+ - structured unordered messages
+ - unstructured byte streams (like TCP or QUIC)
+* Multipath! (QUIC cannot):
+ - mobile client utilizing both Wi-Fi and EDGE at same time
+ - ~90 bytes in same 802.15.4 subnet, ~60 over 6LoWPAN via router
+
+## "QUIC done right"
+
+
+
+
+# muSCTP: how?
+
+From a very broad perspective, described as borrowing and mixing concepts from SCTP, CoAP, DCCP, SST, TLS, SSH2, IPsec/IKEv2, Multilink PPP, `sysctl()`, MQTT and even X11.
+
+- e.g. you need sessions to keep state between connection interruptions to reduce retransmissions, that's why MQTT has them
+- SSH2 is simpler to implement than TLS/X.509, so SSH message types 0-79 used to derive keys, but they have repeated strings
+ * "diffie-hellman-group-exchange-sha256"
+ * "diffie-hellman-group16-sha512"
+ * "diffie-hellman-group18-sha512"
+ * "diffie-hellman-group14-sha256"
+- so use atoms from X11 !
+- control: need to issue commands like `assoc.retrans.max=3`
+ - or more complex: is JSON model too fat?
+
+# "Compact Binary Arrays/Records"
+
+- was a try for a simplified model (like S-Expressions) on nibbles and sextets
+- 9 vs 10 bytes or 10 vs 11 bytes of typical header - versus CBOR
+- so considered too complex to implement, instead of ready CBOR - not worth
+
+# So now need to compress both CBOR and SSH2's BLOB
+
+
+
+
+# CBAR: CBOR and generic BLOBs by-Atom Reducing
+
+* "Atom" is integer replacing some string, see Lisp and X11 (or Win32 API).
+* "Dictionary" is list of atoms - in fact, CBOR array, so indexed from 0
+* We have not only CBOR but also BLOB which structure we do not know
+ - OK, in muSCTP we know - but we don't want to parse SSH2, we want generic
+* Take idea from Shell / Tcl / Makefiles!
+
+```
+atom1="http://192.168.1.10"
+atom2="rgbValue"
+atom3="3:8445/wot/thing"
+atom4="/MyLED/"
+
+echo <<EOF
+'"href": "$atom1$atom3$atom4${atom2}Red",
+'"href": "$atom1$atom3$atom4${atom2}Green",
+'"href": "$atom1$atom3$atom4${atom2}Blue",
+EOF
+```
+
+---
+## In binary this means codes:
+
+* to expand ${atomN} - substitute it's value here, in this place
+* to specify literal - 256 values, so either escape code or LIT LENGTH ...
+
+## -> Problem: for CBOR it will have length prefix for every fragment
+
+
+
+# -> Solution: make it understand CBOR!
+
+[.column]
+Decoder operates as a state machine, with two states:
+- whether we are in BLOB
+- whether we are in CBOR
+
+and a `remaining_bytes` variable to switch between them.
+
+However, ususally there is also enclosing CBOR where all this happens, which - for simple cases - could be viewed as a "hidden" another state, when there is no bytestring so both states above are not entered.
+
+[.column]
+For example, if atom 0 is "rgbValue" and atom 1 is "LED", then
+
+```
+{
+  "key1": 10(0),
+  "key2": 10(1),
+}
+```
+corresponds to
+```
+{
+  "key1": "rgbValue",
+  "key2": "LED",
+}
+```
+
+without any need to enter inside-binary-string processing. This is enough for simple implementations which have not enough ROM for code handling parts of strings.
+
+
+
+
+# One tag to rule them all
+
+Tag #6.10 is THE tag of CBAR, used for everything, either alone or in combination with tags 63, 24 or Alternatives Tags (121-127, 1280-1400)
+
+## Simplest form - dictionary right here
+
+   #6.10([atoms, bytedict, CBAR-bstr, ?checksum])
+
+and form
+
+   #6.10([["rgbValue", "rgbValueRed", "rgbValueGreen"], "", CBAR-bstr]
+
+could be compressed by applying The Tag to atoms themselves:
+
+   #6.10([["rgbValue", #6.10(#2.11 C0 "Red"), #6.10(#2.13 C0 "Green")], ...
+
+If dictionary was set up somewhere earlier (e.g. in CBOR Sequence), that is, CBAR-bstr was null in it's setup, then The Tag is just used in enclosing CBOR where needed:
+
+```
+{
+  "key1": 10(#2.12 C0 "Blue"),       # bstr "rgbValueBlue"
+  "key2": 10(24(h'82 68 C0 4A C1')), # array ["rgbValue", "rgbValueRed"]
+}
+```
+- here, tag 24 on second value means "this is not just binary string, this is CBOR to substitute, and switch decoder to the `IN_CBOR` state".
+
+**It is only when best compression is desired then entire CBOR document should be placed in a single CBAR bstr.**
+
+
+
+
+# Multiple dictionaries and namespaces
+
+Alternatives tags allow to switch between dictionaries - The Tag on map or array defines this map or array to be a "namespace" where The Tag :
+
+```
+   {                    ; level 1 - default dictionary
+     [                  ; level 2
+       10(123({         ; level 3 uses dictionary numer 3
+               10(1),   ; expanded to "foobar"
+               ...
+             })),               
+       10(bstr2),       ; level 2 again
+       10(1),           ; expanded to "quux"
+```
+
+This allows for composability of different parts like "@context" in subtrees in JSON-LD.
+
+
+
+
+# CBOR Sequences
+
+In contrast to cbor-packed, CBOR Sequences are native to CBAR.
+
+   #6.10(#6.63("binary string"))
+
+means there will be several CBOR itmes substituted in this place instead of tagged item. For example:
+
+```
+ #6.10(#6.63(#2.18 "outputData": { "valueType": { "type": "number" } } )),
+/ #17 (CA D83F 52 6F FD0D A1 49 FD0E A1 44 FD0F 46 6E756D626572 -> 22 b) /
+```
+
+substitutes an unfinished fragment of map - useful when there are several maps having some elements in common and just some differing.
+
+
+
+
+# Full setup form - functions / method calls
+
+## import() external dictionaries - '@'
+
+    10(['@', 12345678, '@', 32("http://192.168.1.1:8443/main.dict"), ...])
+
+copy contents of dictionary identified by application-specific number
+12345678 to variable 0 and dictionary identified by URL into variable 1.
+
+---
+## splice() function - '!'
+
+Removes from given array N elements from given index, possibly replacing themwith elements sepcified, possibly putting removed elements to another variable.
+
+Generic function to manipulate dictionaries, in contrast to limited
+[draft-cbor-packed-shuffle]
+
+Example of use together with store() fnuction:
+
+    ['!', [0,0,0,"A","B","C","D","E","F","G","H"], null, ':', 12345678, ...]
+
+variable 0 is populated from scratch by splice() function, no more actions
+(similar to simple form) and A B C D E F G H array will be known under
+12345678 reference for possible later use.
+
+
+
+
+# Problems with cbor-packed - MyLED example
+
+```
+1113([/*shared*/["name", "@type", "links", "href", "mediaType",
+              /*  0       1       2        3         4 */
+      "application/json", "outputData", {"valueType": {"type":
+           /*  5               6               7 */
+      "number"}}, ["Property"], "writable", "valueType", "type"],
+                 /*   8            9           10           11 */
+     /argument/ ["http://192.168.1.10", 6("3:8445/wot/thing"),
+               /* 6                        225 */
+     225("/MyLED/"), 226("rgbValue"), "rgbValue",
+      /* 226             227           228     */
+     {simple(6): simple(7), simple(9): true, simple(1): simple(8)}],
+       /* 229 */
+     /rump/ {simple(0): "MyLED",
+             "interactions": [
+     229({simple(2): [{simple(3): 227("Red"), simple(4): simple(5)}],
+      simple(0): 228("Red")}),
+     229({simple(2): [{simple(3): 227("Green"), simple(4): simple(5)}],
+      simple(0): 228("Green")}),
+     229({simple(2): [{simple(3): 227("Blue"), simple(4): simple(5)}],
+      simple(0): 228("Blue")}),
+     229({simple(2): [{simple(3): 227("White"), simple(4): simple(5)}],
+      simple(0): "rgbValueWhite"}),
+     {simple(2): [{simple(3): 226("ledOnOff"), simple(4): simple(5)}],
+      simple(6): {simple(10): {simple(11): "boolean"}}, simple(0):
+      "ledOnOff", simple(9): true, simple(1): simple(8)},
+     {simple(2): [{simple(3): 226("colorTemperatureChanged"),
+      simple(4): simple(5)}], simple(6): simple(7), simple(0):
+      "colorTemperatureChanged", simple(1): ["Event"]}],
+       simple(1): "Lamp", "id": "0", "base": 225(""),
+       "@context": 6("2:8444/wot/w3c-wot-td-context.jsonld")}])
+```
+
+
+
+
+# What is real cbor-packed goal?
+
+It seems that the only cbar-packed selling point, in comparison to traditional compressors, is the "ability to access data in-place, without unpacking to intermediate buffer", though this statement was never said in clear and clarified. There are also claims that such access is "simple and trivial" for application.
+
+# Note here Application ACCESS IS *NOT* SIMPLE!
+
+Chain of references to keep in memory:
+
+    227("Red") -> 226("rgbValue") -> 225("/MyLED/")
+    -> 6("3:8445/wot/thing") -> "http://192.168.1.10"
+
+these 5 chunks are for single string
+
+    "http://192.168.1.103:8445/wot/thing/MyLED/rgbValueRed"
+
+# How app implementation assumed to consume this string?!
+
+While it's possible, it is definetely NOT easy! It's very error-prone. It's hard to implement correctly.
+
+## How much memory will consume building data structure for this string?
+
+- What if it will take more memory then were saved by avoiding intermediate buffer?
+- How much code memory (ROM) it will take to implement?
+
+# Packed CBOR proposal needs real devices characteristics and examples of implementation!
+
+How much memory do they really have? CoAP block sizes and GHC [RFC 7400] suggest there are always at least several kilobytes
+
+# Finally, what about WRITE access to this packed-cbor?! ;-)
+
+
+
+
+# CBAR can do this, too!
+
+Remember POSIX Shell variables metaphor. But CBAR does not force an implementation to be like this, expanding atoms immediately.
+
+Instead, remember POSIX make(1) utility - where variable expansion is deferred until use. CBAR may be implemented this way - keeping atoms and strings as-is and going via chains of references when access happens. Then, it will be absolutely like cbor-packed w.r.t. accessing strings made of pieces.
+
+---
+## Common wisdom is that even DNS label compression was a mistake
+
+However, such implementation will be faced with the same problems - bugs and security vulnerabilities, as it was in history with DNS.
+
+Thus, while possible, CBAR is described in terms of "copy butes" - as a recommended way to have less bugs in implementation.
+
+
+
+
+# CBAR can do more!
+
+Observe that many protocols in history were dealing with the same problem - how to transfer less bytes for some human readable strings, but without applying generic compressor. JSON-LD, CBOR-LD, YANG SID, even ASN.1 OIDs in SNMP - many of them.
+
+CBAR, with it's ability to have multiple dictionaries, can be foundation block to replace many such protocols / make new CBOR-based protocols better.
+
+---
+## CBAR is more powerful but simpler and uses less tags
+
+Packed CBOR has two tables instead of one, but allow only prefixes, suffixes or join() combinations. CBAR have just one table linearly processed and any number of atoms may be used in element. In fact, CBAR can be used for CBOR templating even without any compression.
+
+[cbor-packed-shuffle] offers just one way of dictionary rearrangement. CBAR facilities to modify packing table are more powerful.
+
+cbor-packed do not have any standard way to manage external dictionaries, e.g. outside of every protocol message. CBAR from the beginning defines dictionary referencing and manipulating in terms where CBOR constructs are equivalent to application calls on decoder/encoder.
+
+# Conclusion: CBAR can completely replace cbor-packed

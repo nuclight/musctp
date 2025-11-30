@@ -7578,6 +7578,51 @@ http://web.archive.org/web/20210128145701/http://www.dlugosz.com/ZIP2/VLI.html
  1111xxxx aaaaaaaa bbbbbbbb cccccccc dddddddd ...      - 40..128 bits
  111111yy xxxxxxxx ...      aaaaaaaa ...               - to 2^32 bytes
 
+TBD 21.11.25 Note that above is for representing BigInts, but actual BigInt
+format, especially with memcmp()-sortable property, will need more than that -
+at least negative numbers, may be floating point. But if the need to encode
+just *length* of some value, then actually we need less: given estimate of
+about 10^80 order of magnitude atoms in Universe, no one will ever need more
+than 2^264 bytes, so ASN.1 DER and MSDTP lengths of length up to 128 bytes are
+too much; thus the task is effectively to create VarUInt256
+
+ 0..191
+ 110aaaaa bbbbbbbb                                                       - 13
+ 1110aaaa bbbbbbbb cccccccc                                              - 20
+ 110aaa bbbbbbbb cccccccc dddddddd                                     - 27
+ 111000aa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 34
+
+ 11100100 aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee                   - 40
+ 11100101
+ ...      26 lengths XXX not from 4?
+ 11111111 <32 bytes>
+
+ 0..143
+ 1001aaaa bbbbbbbb                                                       - 12
+ 1010aaaa bbbbbbbb cccccccc                                              - 20
+ 1011aaaa bbbbbbbb cccccccc dddddddd                                     - 28
+ 1100aaaa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 36
+ 1101aaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 44
+ 111000aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg          - 50
+ 11100101 aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg - 56
+ ........
+ 11111111 - 33 bytes = 264 bits
+
+ 0..159
+ 1010aaaa bbbbbbbb                                                       - 12
+ 1011aaaa bbbbbbbb cccccccc                                              - 20
+ 1110aaaa bbbbbbbb cccccccc dddddddd                                     - 28
+ 1101aaaa bbbbbbbb cccccccc dddddddd eeeeeeee                            - 36
+ 111000aa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff                   - 42
+ 11100101 aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff          - 48
+ ........
+ 11111111 - 32 bytes = 256 bits
+
+Smart contracts use 256- or 257-bit integers; 256-bit words for the Ethereum Virtual Machine. "We realize that a 257 bits byte is quite unusual, but for smart contracts it is ok to have at least 256 bits numbers. The leading VM for smart contracts, Ethereum VM, introduced this practice and other blockchain VMs followed."[8]
+[8]Borisenkov, Dmitriy (23 October 2019). "[llvm-dev] RFC: On non 8-bit bytes and the target for it". Retrieved 2021-09-11.<https://lists.llvm.org/pipermail/llvm-dev/2019-October/136115.html>
+
+so it isn't clear if 256 or 264 bits better...
+
 =========== Format with Sextets instead of VarNibbles =====
 
 Pentads:

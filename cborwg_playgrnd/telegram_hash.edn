@@ -1,0 +1,270 @@
+/* CBOR-TPL program for hashing by ALDR, Telegram example at
+   https://mailarchive.ietf.org/arch/msg/cbor/yT5C8tlm8FUJKXC2Eq1hx_MX5fI/
+ */
+10([
+    'defun', 'do-one-item', ["hash-algo", "cbor-item"], {/*no opts*/}
+    [ /* function body begin */
+        'package', 'require', "digest", ';',   /* imaginary hashing lib */
+        'set', "hasher-obj", 10([
+            'digest::new_by_tag', 10(['$', "hash-algo"])
+             ]), ';',
+
+        /* Function new_by_tag returned new unique command name which we have
+           put into variable: commands are like in POSIX Shell so may have
+           subcommands, e.g. "git init" or "git fetch", just here we will use
+           "$hasher init" and "$hasher update", where $hasher variable contains
+           something like "digesthash54930cmrg40" - kinda object-oriented :-)
+         */
+        10(['$', "hasher-obj"]), "init", ';',
+
+        /* Our procedure is recursive, and main part of it is if|else by
+           Major Type - array, map, or just scalar. First will be array as
+           simplest case.
+         */
+        'if', [
+            'eq', 10([
+                      'typeof', 10(['$', "cbor-item"])
+                  ]),
+                  'ARRAY'
+        ], 'then', [ /* "then" is optional, just for readability */
+            /* if body for array: iterate over all elements */
+
+            'foreach', 'arr-elem', 10(['$', "cbor-item"]),
+            [ /* foreach body */
+
+                /* Recursively call on array element putting it's hash
+                   to $elem-hash
+                 */
+                'set', 'elem-hash', 10([
+                    'do-one-item',
+                        10(['$', "hash-algo"]),
+                        10(['$', "arr-elem"])
+                     ]), ';',
+
+                /* and call CTX_Update() of our hasher with it */
+                10(['$', "hasher-obj"]), "update", 10(['$', "elem-hash"]),';',
+            ] /* end foreach arr-elem */
+        ], 'elsif', [
+            'eq', 10([
+                      'typeof', 10(['$', "cbor-item"])
+                  ]),
+                  'MAP'
+        ], 'then', [
+            /* By spec, hash of map is hash of sorted hashes of each pair,
+               so we need to store those hashes somewhere first, then sort
+               and only then process.
+             */
+            'set', 'hashlist', [], ';',
+
+            /* 'foreach' can iterate more than variable at a time, but still
+               needs flat array, so we could use unwrap operator '@' to get
+               list from reference, but that would splice the list into
+               arguments, thus requiring to wrap result into new CBOR array,
+               so it could look
+                  'foreach', ['key', 'value'],
+                      10(['process-cbor,
+                          [ 10(['@', 10(['$', "cbor-item"])]) ]
+                      ]), ...
+               but let's make it simpler - just key
+             */
+            'foreach', 'key', 10(['keys', 10(['$', "cbor-item"])]),
+            [ /* foreach body */
+                /* so we need to obtain value first */
+                'set', 'value', 10(['$', "cbor-item", 10(['$', 'key' ])]), ';',
+
+                /* now our BUSINESS LOGIC!^W^W ALDR itself */
+                'if', [
+                    'eq', 10(['$', 'key']), "access_hash"
+                ], [ /* "then" keyword is optional */
+                    'continue'  /* field is ignored in calculation */
+                ], 'elsif', [
+                    'and', 10([
+                               'eq', 10(['$', 'key']), "date"
+                            ]),
+                           10([
+                               'eq',
+                                    10(['typeof', 10(['$' 'value'])]),
+                                    'uint'
+                            ])
+                ], [ /* If "date" is just numeric, normalize it to Tag 1 */
+                    'set', 'value', 10([
+                            'process-cbor', 1(10("value"))
+                            /* 10(tstr) is equivalent to 10(['$', "var"]) */
+                        ])
+                ], 'elsif', [
+                    'not', 10(['string', 'is', 'ascii'])
+                ], [ /* We don't allow Unicode keys */
+                    'die', 10([ /* Throw exception */
+                        'sprintf', 'ALDR violation: key <%s> is not ASCII',
+                            10(['to_edn', 10(['$', 'key'])])
+                        ])
+                ], 'elsif', [
+                    /* Artificial ALDR rule about duplicate map keys - let's
+                       pretend our application ignores case so that 'one_key'
+                       and 'OnE_KEy' are considered the same.
+                       For this, we do several statements in "if" condition,
+                       including distinct temporary hasher and checking
+                       if we already seen such hash.
+                     */
+                    'set', "tmphasher", 10([
+                        'digest::new_by_tag', 10(['$', "hash-algo"])
+                         ]), ';',
+                    10(['$', "tmphasher"]), "init", ';',
+                    10(['$', "tmphasher"]), "update",
+                        10(['string', 'tolower', 10(['$', 'key'])]), ';',
+                    /* TODO should have temporary map for faster than O(N)
+                       array search, but "set" syntax for keys currently
+                       clashes with namespaces
+                     */
+                    '>=', 10([
+                            /* List search: returns index or -1 */
+                            'lsearch', 10(['$', 'hashlist']),
+                                10([
+                                    10(['$', "tmphasher"]), "final"
+                                ])
+                          ]),
+                          0
+                ], [
+                    'die', 10([
+                        'sprintf', 'key <%s> is duplicate by ALDR',
+                            10(['to_edn', 10(['$', 'key'])])
+                        ])
+                ], ';',
+
+                /* To support tables (in future) and elision of individual
+                   keys or values, we view ordinary Major Type 5 map like
+                   unsorted table with two columns:
+                      {..., "k1":"v1", "k2":"v2",...}
+                   as if
+                      [..., ["k1", "v1"], ["k2":"v2"], ... ]
+                   so hash pair accordingly. For it, in this implementation
+                   we fake 2-item array and recurse to oursevles.
+                 */
+                'set', 'pairhash', 10([
+                    'do-one-item',
+                        10(['$', "hash-algo"]),
+                        10([
+                            'process-cbor', [
+                                10(['$', "key"]),/* FIXME string tolower */
+                                10(['$', "value"])
+                            ]
+                        ])
+                     ]), ';',
+
+                /* treat array as stack - add to end */
+                'push', 'hashlist', 10(['$', 'pairhash'])
+            ], /* end foreach */
+
+            /* TBD will empty callback to list sort be for ascending? */
+            'set', 'hashlist', 10([
+                'lsort', {}, 10(['$', 'hashlist'])
+                ]), ';',
+
+            'foreach', 'elem-hash', 10(['$', "hashlist"]),
+            [
+                10(['$', "hasher-obj"]), "update", 10(['$', "elem-hash"])
+            ]
+            /* end of MAP case */
+        ], 'elsif', [
+            'eq', 10([
+                      'typeof', 10(['$', "cbor-item"])
+                  ]),
+                  'TAG'
+        ], 'then', [
+            /* To support elision which Merkle-tree allows us, we must hash
+               each tag individually. This is because we (in general spec)
+               don't know in advance which types user can transform. For
+               example, in
+                    777(888(["Samhein", "Christmas"]))
+               we don't know if it is as-is so could be elided like
+                    777(888(9121([h'hash...']))
+               or it is equivalent to e.g.
+                    777(1003([{1:1761944400}, {1:1766610000}]))
+               where elision now could be of corresponding duration:
+                    777(9133([h'hash...']))
+               For this reason, tags are viewed as structural elements, like
+               arrays or maps (and they even have their own type of brackets
+               in EDN).
+               Because tags are short, their hash is defined to be of tag
+               concatenated with content's hash, e.g. for if for SHA-256 and
+                    32("http://...")
+               hash of string is 0xABCDEF... then target hash is calculated
+               from 34-byte string 0xD8 20 ABCDEF...
+
+               Here, Tag 9134 is 0x23AE == '#', ALDR, Elision:
+                    9134(bstr)
+               or external reference
+                    9134([ALDR-name, hash-algo-plus-hash])
+               where latter is usually from COSE e.g. 18540(bstr) but may be
+               more array elements in future (e.g. HMAC parameters).
+
+               And Tag 9133 is 0x23AD == '#', ALDR, Document|Declaration
+               to prescribe how entire document to be hashed:
+                    9133([ALDR-name, hash-algo, document])
+               where document MUST be (tagged) array or map, hash-algo is uint
+               of tag for algorithm, e.g. tag 18540 (= 18556 + (-16)) is
+               SHA-256 hash, and may be non-uint for future extensiions (like
+               salt for HMAC; and ALDR-name is uint with bitmap for common
+               cases (preferred, etc.) or identifier for CBOR-TPL program like
+               one you are currently reading.
+
+               If it is 9134(bstr) elision, then just bstr value is used - it
+               MUST have been calculated with same parameters as parent.
+               Transclusion of documents with different algorithm and ALDR
+               rules is not directly supported by tag - this could be done
+               by application or corresponding CBOR-TPL 10([]) wrapper.
+
+               TODO TBD decide what to do if other forms occured
+             */
+            'set', 'tag-num', 10(['tag-num', 10(['$', "cbor-item"])]), ';',
+            'set', 'content', 10(['tag-content', 10(['$', "cbor-item"])]), ';',
+
+            'if', [ /* if elided, just return already calculated hash */
+                'and',  10([
+                            '==', 10(['$', 'tag-num']), 0x23ae
+                        ]),
+                        10([
+                            'eq', 10([
+                                    'typeof', 10(['$', 'content'])
+                                ]),
+                                'bstr'
+                        ])
+            ], [
+                'return', 10(['$', 'content'])
+            ], ';',
+
+            /* create bare Major Type 6 bytes */
+            'set', 'istr', 10([ /* example of command running other command */
+                    'cbor::with_preferred',      /* a-la "nice cmd ..." */
+                    'cbor::make_tag', 10(['$', 'tag-num'])
+                ]), ';',
+            /* add bytes to variable from recursive call on content */
+            'append', 'istr', 10([ 
+                    'do-one-item',
+                        10(['$', "hash-algo"]),
+                        10(['$', "content"])
+                ]), ';',
+            /* and finally calc hash */
+            10(['$', "hasher-obj"]), "update", 10(['$', "istr"])
+        ], 'else', [
+            /* What is left - just plain scalars. Get a serialization into
+               bstr variable which then feed to hash algo.
+             */
+            'set', 'istr', 10([
+                    'cbor::with_preferred',
+                    'cbor::encode',
+                    10(['$', "cbor-item"])
+                ]), ';',
+            10(['$', "hasher-obj"]), "update", 10(['$', "istr"])
+        ], ';' /* end if */
+
+   /* TBD how to construct dynamic value tags? e.g. 1($x($y("str"))
+      - [cbor::tag_it number content]
+   */
+
+        /* "$hasher final" will return hash value, so return it to caller */
+        'return', 10([10(['$', "hasher-obj"]), "final"]) 
+        /* TODO unwind-protect to not leak hasher-obj on exceptions */
+    ] /* end do-one-item */
+
+])

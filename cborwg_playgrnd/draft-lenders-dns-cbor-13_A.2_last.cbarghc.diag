@@ -1,0 +1,83 @@
+10([
+  'nc',
+  10([
+  simple(0),
+    <<3600, 28>>,
+    <<[
+        /* PTR (12) question for "example.org" */
+        [
+          /* appends 0 => ["example", "org"] to virtual packing table */
+          "example",
+          /* appends 1 => ["org"] to virtual packing table */
+          "org",
+          12
+        ],
+        /* Answer section: */
+        [[
+          /* PTR (12) for "example.org" */
+          /* (both elided since they are the same as in question) */
+          /* is "_coap._udp.local" with TTL 3600 */
+          3600,
+          /* appends 2 => ["_coap", "_udp", "local"] to virtual packing table */
+          "_coap",
+          /* appends 3 => ["_udp", "local"] to virtual packing table */
+          "_udp",
+          /* appends 4 => ["local"] to virtual packing table */
+          "local"
+        ]],
+        /* Authority section: */
+        [
+          [
+            /* NS (2) for "example.org" */
+            /* (name elided since its the same as in question) */
+            /* is "ns1.example.org" with TTL 3600 */
+            3600, 2,
+            /* appends 5 => ["ns1", simple(0)] to virtual packing table */
+            "ns1", simple(0)  /* expands to ["example", "org"] */
+          ],
+          [
+            /* NS (2) for "example.org" */
+            /* (name elided since its the same as in question) */
+            /* is "ns2.example.org" with TTL 3600 */
+            3600, 2,
+            /* appends 6 => ["ns2", simple(0)] to virtual packing table */
+            "ns2", simple(0)  /* expands to ["example", "org"] */
+          ]
+        ],
+        /* Additional section */
+        [
+          [
+            /* AAAA (28) for "_coap._udp.local" */
+            /* is 2001:db8::1 with TTL 3600 */
+            simple(2),    /* expands to ["_coap", "_udp", "local"] */
+            false, # false is a stub instead of atom as tools don't know CBAR
+            # h'20010db8000000000000000000000001' becames /64 and 7 zeroes
+	    h'2001 0db8 0000 0000 FE 87 01'
+          ],
+          [
+            /* AAAA (28) for "_coap._udp.local" */
+            /* is 2001:db8::2 with TTL 3600 */
+            simple(2),    /* expands to ["_coap", "_udp", "local"] */
+            false, # false is a stub instead of atom as tools don't know CBAR
+            h'fe67 /6+2=8=n, 7+1=8=s/ FE 87 02'
+/* in *asterisks* ref'd string, comma at input ptr (where 20010d... would be)
+00000040  84 19 0e 10 02 63 6e 73 32 e0 84 83 e2 f4 4a*20  .....cns2.....J 
+00000050  01 0d b8 00 00 00 00*87 01 83 e2 f4 50,fe 67 87  ............P.g.
+*/	    
+          ],
+          [
+            /* AAAA (28) for "ns1.example.org" */
+            /* is 2001:db8::35 with TTL 3600   */
+            simple(5),    /* expands to ["ns1", ["example", "org"]] */
+            false, h'/Atom 1/ 1e /7 zeroes/ FE 87 35'
+          ],
+          [
+            /* AAAA (28) for "ns2.example.org" */
+            /* is 2001:db8::3535 with TTL 3600 */
+            simple(6),    /* expands to ["ns2", ["example", "org"] */
+            false, h'/Atom 1/ 1e /6 zeroes/ FE 86 3535'
+          ]
+        ]
+    ]>>
+  ])
+])

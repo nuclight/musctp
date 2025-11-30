@@ -2632,7 +2632,7 @@ date (11.02.25 20:30 version) is not so simple as things were in December
       with root variable for such paths?
       - 06.03.25 17:09 yes, let's go this unified document way, see also this
         datetime below
-    - 05.04.24 02:00 we can define that FD 0x < 9 is treated as if it was
+    - 05.04.25 02:00 we can define that FD 0x < 9 is treated as if it was
       10([_x CBOR]) instead of VarElem array so that *any* [conversion]
       function can be called here, without dealing with bits, and it even will
       be reasonably short with proper 'parse-alias' and may even have more
@@ -2803,6 +2803,12 @@ to `jq` utility for needed features, so let's read it's manual and comment:
 		- 19.03.25 04:00 here's strong argument: it's expensive for
 		  constrained implementations to keep 128 dicts *per frame*
 		  so must be explicit dictionary push only
+            - 15.11.25 05:23 for "$subdocument" variable assignment, that means
+              'process-cbor' must be called on "set"'s argument for this to
+              work? and same for every other command? and what if we want to
+              assign as-is for "deferred" processing? again Lisp's (quote ...)
+              and (list ...) or ,comma syntax together with `backquote; also
+              note that in Tcl this will be for quoted {} instead of []
       * [+tstr]: namespace variable
 - 07.03.25 16:30 to support compiling to machine code, variables in [proc]'s
   must provide for (optional if non-compiled but dynamic) typing, for this
@@ -2821,6 +2827,7 @@ to `jq` utility for needed features, so let's read it's manual and comment:
     - 16:40 make all that codes also accept string in addition to int for
       going to named label, or that label-named block of loops? see perlsyn
       for LABEL: while (...) {...}
+    - 26.11.25 see this day for Lisp facilities, e.g. 'block' and 'tagbody'
   - 18.03.25 to avoid too many arguments to [proc], map may be used:
     "-static", "-doc" etc. keys; and think of somehow doing this generally
     instead of Tcl's -options?
@@ -3091,7 +3098,7 @@ actual "take reference / anchor name" still needed.
   some code? Somewhat like applying CBAR recursively to itself?
 - 01.09.25 19:00 note that "messages on objects" together with Table data type
   sounds like a try to apply Erlang's lightweight-processes paradigm to objects
-  in kernel: a script quieries and sets rows in a connection tracking table
+  in kernel: a script queries and sets rows in a connection tracking table
   (conntrack), for example - without locks!
 - 03.09.25 16:00 no, due to security/safety, we won't go object way: it's more
   safe to track potentiall harm centralized in a command than if it scattered
@@ -3175,6 +3182,26 @@ actual "take reference / anchor name" still needed.
                 for shortcuts in CBAR/CBAPT only and could be further reduced
                 by 1 byte utilizing simple(12), simple(13) etc.
                 - BTW with '@' 4 simples not enough: evidence for RFCregsimples
+            - 26.11.25 02:30 had a problem with 'return' when not CBAPT, so
+              searched Common Lisp: they have 'block', 'return-from' and
+              'return' as macro: `(return) ==  (return-from nil)` - the
+              'block' named 'nil' is usually made by loop macros ('do' etc.)
+              so it is essentially'break' for them; also CL has 'tagbody'
+              which is also (like 'block') implicit 'progn', but allows 'go'
+              (goto) inside it; and body of a lambda expression is an implicit
+              'progn' also; and finally 'defun' macro augments created 'lambda'
+              with 'block' named same as function so that:
+                 (defun temp (x)
+                     (if x (return-from temp 'dummy))
+                     44) =>  TEMP
+                  (temp nil) =>  44
+                  (temp t) =>  DUMMY
+              therefore, need somewhat rethink of OK, CONTINUE, BREAK codes
+            - 26.11.25 03:35 'foreach', 'x', 10(['@', 10(['$', "aref"])]),
+              seems to be incorrect as it will splice arguments; also a
+                  'set', 'label', '$', ['atom-list', '$', 'label']
+              in DNS CBAPT example also incorrect? Either '$' must pass it's
+              argument to 'eval', or it must be escaped: '$' can be valid key!
         - 12.10.25 16:30 no (see also this day), we better have reader macros
           which also parses many other tags to C structs (whatever is added),
           so parsed representation is always simple and native - tables BTW are
@@ -3220,6 +3247,13 @@ actual "take reference / anchor name" still needed.
                 to closure will lead to leak of unused variables - so need to
                 add explicit "capture" variable list - we are not comfortable
                 language but high-level assembler anyway...
+                - 11.11.25 14:50 Upwards funarg problem: explicit providing by
+                  reference or by value actually may be more flexible
+              - 11.11.25 03:00 still same problem: need to apply to e.g. body
+                of 'foreach' which is not tagged
+                - an eval-hook macro may be... but then, should it be global?
+                  probably no, be part of lexical environment inherited from
+                  outer macro, to allow different syntaxes in other packages
       - 09:30 what if using thmap(9) in SQLite4-style - everything in a single
         tree? or at least [row][column] number keys in table?
       - 15:17 so a table body is array of row items and each row item is array
@@ -3376,6 +3410,8 @@ actual "take reference / anchor name" still needed.
   be able to delete individual nodes or entire hash), so overhead per key/value
   pair is 40 bytes instead of 48; need to calculate threshold when thmap or
   zfs_btree overhead; also need custom hashes for e.g. conntrack C struct case
+  - 22.11.25 TBD what is needed here to support Merkle-tree style hashing or
+    at least dCBOR ?
 - 24.10.25 04:00 given the CBOR Pointer draft, we probably don't need new
   Tag 94: our function "$" means "get value of variable" and it should be
   changed to CBOR Pointer for most common version, and next we can just have
@@ -3393,6 +3429,61 @@ actual "take reference / anchor name" still needed.
     interpreter? That is, for input in internal config stream not just atoms
     and sesctl variable tree, but full-fledged RPC / language input, of which
     variable query/set be just part, utilizing CBOR Pointer?
+  - 05.11.25 in msg to Rohan Mahy, I've suggested CBOR Pointer to be like:
+    `document.getMethod1(arg1).getMeth2(arg2).chkTag(arg3).unpackBstr().get(4)`
+    - 15.11.25 02:10 but better to do this as passing CBOR Pointer's tail
+      recursively to methods on subsequent objects, e.g. initial Pointer
+      ["data","pkt","tcp","options","mss_val"] extracts value on "data" key
+      and passes ["pkt","tcp","options","mss_val"] to this object, but if here
+      "pkt" is a tagged bstr with a C structure represented as instance of
+      some OOP class, then "pkt" called with ["tcp","options","mss_val"] do
+      not further use any CBOR but returns `tcp.options.mss_val` from it's
+      C structure directly - and this is what we definitely want in muSCTP or
+      firewall applications (together with optimizing tail recursion to loop)
+      - 18.11.25 00:20 in fact, any CBOR element's type can be CDDL-described
+        elem-type = [ * tag, major-type ]
+        therefore, explicit pathspec type-checking step, in spirit of
+        [..., "name_of_nested", checktype(24(bstr)), "in_nested_key"]
+        may be done as just one TBD7([+uint]) instead of TBD2...TBD5, where
+        last uint is a bitmap - also to support sequences. Note that this even
+        shorter than several TBD4(tag)'s in -00 draft when there are at least
+        two tags on element; for just major type without tags, TBD7(uint) may
+        be used to save 1 byte. This way, CBOR Pointer may be made unified
+        instead of implicit/explicit distinction, while allowing 7("key1") to
+        be pathspec without problem of separate tag step... what is left to
+        decide is bits for types, is it there need to '*' match of tags
+        (which could be expressed by -1), and how to distinguish decoding of
+        nested bytestring without stepping into it from returning it without
+        simple(TBD0); also need to support tagged/untaged, so examples are:
+        [777, 1, 35]                             [1(1760686166)]
+        [777, 1, 35, 1]                          [1760686166]
+        [777, 2]                                 [h'49a202182d63706471f4']
+        [777, 2, 2]                              [45]
+        TBD1([TBD4(777), TBD2(2), simple(TBD1)]) [ {2:45, "pdq":false} ]
+        - 01:10 instead of simple(TBD0), 31(undefined) may be used - this is
+          as if [..., ] was passed to inner object's method - that is,
+          nothing, and empty CBOR Pointer must return entire document
+        - 01:40 the problem with tag that step into must be combined with check
+          [TBD7([777, 4]), 1, 35, 21607(1)]      [1760686166]
+          we can define that 21607(uint) is both checks that type is tag and
+          it equals to number and steps inside it, then TBD7([ tag, ..., uint])
+          can be defined as shorthand of 21607(tag), ..., TBD7(uint) - so for
+          implementations without separate tags but instead list of tags
+          attached to main item, this would be no-movement, just type-check
+          step, for others it will both step into and check major type of
+          final element; and for both we can view tags like a "special" map
+          with only one numeric key, so that
+          [TBD7([777, 4]), 1, 35, 1] still also gives [1760686166]. In fact
+          TBD7([ tag1, tag2, mjtype]) e.g. TBD7([777, 888, 3]) is equivalent
+          TBD7(6), 777, TBD7(6), 888, TBD7(3) or
+          21607(777), 21607(888), TBD7(3)
+          ...now problem is how to address map keys tagged 21607 or TBD7
+          - 02:04 haha, just use 20853(key) for quoting, and it itself was
+	    20853("key"), then use 20853(20853("key")) and so on... BTW this
+	    also solves problem if someone built a map with 31(undefined) as
+	    a key
+  - 14.11.25 23:59 to splice array which is '@$ref' in Perl, or map, or tag,
+    CDDL (Section 3.7 of RFC 8610) has '~' unwrap operator
 
 
 TBD 12.10.25 Clojure has syntax (hash-set :a :b :c)     ; ⇒ #{:a :b :c}
@@ -3691,7 +3782,77 @@ compares cbor-packed with records tags and and with gzip, where says that
 "generally is about 2-4x slower with gzipping" - a serious reason for CBAPT on
 non-constrained machines
 
+TBD 10.11.25 searching about Lisp-1/Lisp-2 distinction
+looking at Tcl, we are Lisp-2 (or more?), however, that's for
+global/namespace variables - lexical-scoped must be unified
+(Lisp-1) as in Perl: my $anon = sub {...}
+#'<identifier> or #<SUBR CONS> - may be use for tag number or somewhat
+...reading Gabriel's paper, about FUNCALL and #' harder to read, e.g.
+(DEFUN G (F) (F 3)) for applying passed arg F as function in contrast
+to calling global function F (instead of arg) in Lisp 1.5/Lisp-2, it's
+easiliy noted that most of these debates are resolved just by utilizing
+"$name" versus just simple "name"; and also they stem from the fact that in
+Lisp every argument is evaluated unless 'quoted, but in Tcl and CBOR-TPL
+we don't need - those are just arguments as if "quoted" unless "unquoted"
+by explicit 10([])
+> (DEFMACRO FOO (X Y) ;take deep breath
+>   `(FUNCALL ',#'CONS 'FOO (FUNCALL ',#'CONS ,X (FUNCALL ',#'CONS ,Y NIL))))
+haha!
 
+TBD 11.11.25 need to think about coroutines and/or green threads, both for
+userland applications (obvious) and in-kernel message-passing between threads:
+e.g. we need info for this packet from conntrack table of other thread, we put
+mbuf to queue, send message and "return" being able to process other packets
+in this interpreter (real thread) and on reply message we "resume" that
+packet's processing; while for real state tables saving mbuf may be to bad for
+performance (and problematic if we need to return some "consumed" to
+interpreter's caller) even than to hand-over mbuf to that thread, such mechanism
+may be useful for tricks like "stop this packet and wait for DNS resolver".
+Also continuations/state machine messages may be somehow useful for that "pass
+packet to another thread" with state - where processing will be resumed from
+specific point rather than beginning
+
+TBD 16.11.25 01:40 about tables: if support sparse tables or column-oriented
+(at least in chunks, e.g. 256 repeated "Received:" will compress well), then
+probably need to support bitmaps of what fields (columns) are actually present
+in this record, so need to define general tag for bitmaps in CBOR. Let it be
+TBD([int, bstr]) for uncompressed except that number of bits may be much more
+than length of bstr (TODO think of padding), and TBD(bstr) for bitmap ranges
+from muSCTP: Pyramint etc.
+- 17.11.25 21:00 this is doable, and even intermixed in chunks, by utilizing
+  existing tags 40 (Row-Major Order) and 1041, Column-Major Order, for body of
+  the table: small types like ordered map can go directly after header without
+  additional tagged arrays, or larger tables may be a 256 rows column-order
+  chunk 1040(array), and then 300 rows in 40(array), etc.; Homogeneous Array
+  (tag 41) may be also allowed, should reserve in spec a way for bstr of a row
+  instead of array - to be able in future use more compact Homogeneous Arrays
+
+TBD 21.11.25 evaluate https://amazon-ion.github.io/ion-docs/docs/symbols.html
+for our dictionaries
+
+TBD 26.11.25 trying to implement `telegram_hash.edn` revealed need for:
+* how to construct dynamic value tags? e.g. 1($x($y("str"))
+  - [cbor::tag_it number content]
+* need of 'unwind-protect' to have code run on exceptions fired - example was
+  created global command word $hasher-obj which will leak if 'die' fired
+* 'set' clash of namespaces and CBOR Pointer: 'set', ['x', 'y'] value will be
+  what? variable $x::y or 'y' key in variable $x? while in full form 
+  [['foo', 'bar'], 'key'] it is unambiguous, it is 2 bytes overhead which is
+  big for packed CBAPT/CBAR cases
+* see 26.11.25 03:35 for incorrect unwrapping by '@', also for map? also is
+     'set', 'label', '$', ['atom-list', '$', 'label']
+  in DNS CBAPT example doable or totally incorrect? Either '$' must pass it's
+  argument to 'eval', or it must be escaped: '$' can be valid key!
+* unwrapping map by '@' ?
+* what 'typeof' should return, string or number? mb 'typeis' which accepts
+  both as second argument?
+  - 29.11.25 also what for indefinite-length? here is an error - they're
+    currently unhandled
+* ';' was used from CBAPT, could we use relaxed macro just for this?
+* 'return' should have been 'return-from' with name and the entire function is
+  globally named to call itself recursively - ideally it should have return
+  lambda to not pollute namespace (though unique 'namespace eval' instead?),
+  but how to do recursion then and named (preferably locally-scoped) blocks?
 
 
 TODO
