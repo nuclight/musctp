@@ -3485,7 +3485,6 @@ actual "take reference / anchor name" still needed.
   - 14.11.25 23:59 to splice array which is '@$ref' in Perl, or map, or tag,
     CDDL (Section 3.7 of RFC 8610) has '~' unwrap operator
 
-
 TBD 12.10.25 Clojure has syntax (hash-set :a :b :c)     ; ⇒ #{:a :b :c}
 so a possible punctuation for sets in higher-level front-end language
 
@@ -3501,7 +3500,6 @@ TBD 28.10.25 GnuCOBOL docs:
 
 The INITIAL clause, if specified, guarantees the subprogram will be in its initial
 (i.e. compiled) state each and every time it is executed, not just the first time.
-
 
 TBD 07.11.25 about implementation. A capable constrained machine with sizeof
 pointer == 2 bytes could use linked lists of 8-byte structures:
@@ -3839,6 +3837,8 @@ TBD 26.11.25 trying to implement `telegram_hash.edn` revealed need for:
   what? variable $x::y or 'y' key in variable $x? while in full form 
   [['foo', 'bar'], 'key'] it is unambiguous, it is 2 bytes overhead which is
   big for packed CBAPT/CBAR cases
+  - 28.11.25 have it on-par with '$', as if '$' was unshifted, so ['x', 'y']
+    is key in variable 'x', so will need [['x', 'y']] for bare x::y access
 * see 26.11.25 03:35 for incorrect unwrapping by '@', also for map? also is
      'set', 'label', '$', ['atom-list', '$', 'label']
   in DNS CBAPT example doable or totally incorrect? Either '$' must pass it's
@@ -3846,13 +3846,24 @@ TBD 26.11.25 trying to implement `telegram_hash.edn` revealed need for:
 * unwrapping map by '@' ?
 * what 'typeof' should return, string or number? mb 'typeis' which accepts
   both as second argument?
-  - 29.11.25 also what for indefinite-length? here is an error - they're
+  - 29.11.25 also what for indefinite-length? BTW here is an error - they're
     currently unhandled
+    - 30.11.25 03:05 make it bitmap? e.g. 8 bits for types and 9-th (256) will
+      mean "sequence", or indefinite-length if set together with 2, 3, 4, 5
+      types
+    - 30.11.25 03:10 also represent it like array, just as tag is also special
+      container type, but restrict available operations on it, to be able to
+      support calling on non-yet fully received and/or represented by list
+      (instead of array) internally... mb special 'foreach-indefinite' ?
 * ';' was used from CBAPT, could we use relaxed macro just for this?
 * 'return' should have been 'return-from' with name and the entire function is
   globally named to call itself recursively - ideally it should have return
   lambda to not pollute namespace (though unique 'namespace eval' instead?),
   but how to do recursion then and named (preferably locally-scoped) blocks?
+- 30.11.25 from discussions: simple(59) from SD-CWT to splice into map? which
+  is { key => 42, %otherhash } in Perl
+- 30.11.25 remembering 1-st April CBOR-TF7, CBAR could also be called, cf.
+  Unicode, a CBOR Transformation Format
 
 
 TODO

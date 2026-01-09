@@ -102,6 +102,8 @@ TBD incorporate Section 1 of https://www.ietf.org/archive/id/draft-omar-ipv10-12
    over the time more rapidly then protocols, so making assumptions about
    hardware capabilities at the time of protocol designing is not far-sighted.
 
+TODO 08.12.25 include that actually we have 1475 NHFI field for them to not deal
+
    IPnh borrows ideas from Huawei's NewIP and IPng proposals which were
    alternatives to IPv6: IPv7 [RFC 1475] and Pip [RFC 1621][RFC 1622]. It's
    not surprising why Pip losed the contest to simpler proposals like SIPP:
@@ -265,7 +267,7 @@ Operational Aspects: NSIS not only required trust between customers and their pr
    IPv4 and IPv6 addresses in such manner that hosts with such addresses and
    IPnh hosts can communicate without need dual-stack (triple-stack, etc.)
    support in each host, that is, without modification of hosts' software
-   (except may be easy little parts like DNS resolver).
+   (except, may be, easy little parts like DNS resolver).
 
 TBD which variant to take for compatible v4/6 ? tag 52/54/260 to string?
 top-level in hier?
@@ -300,7 +302,7 @@ TBD LDAP has multi-valued RDN, should we generalize it?
 . as 0, .. as 1 and ../.. as 2 ?
 **/ for anycast?
 - 20.10.24 or anycast can be "symlink", invisible to sender
-  - however response "here is neares to you" may be more efficient
+  - however response "here is nearest to you" may be more efficient
     - but may be policy-disabled due to security concerns
 
 it is tempting to mix layers having addresses of sockets, but Lindy Effect
@@ -324,7 +326,7 @@ HIP says about mixing two layers, address and identity, but itself ironically mi
 TBD | 25.10.24 ~22:00 a ThSC point in a roaming from Home node is conceptually
     v   same situation as an IP host moving from 3G to WiFi link without
         connection interruption so Host IDs are here; however, differences are:
-	1) Host ID ~= SSH key - is for for one online device of several, here,
+	1) Host ID ~= SSH key - is for one online device of several, here,
 	   it's like Anycast for online packets
 	2) for mail/offline data, it's like a Multicast now
 
@@ -465,7 +467,7 @@ by NAT is the *address independency* and *reusing single IP
 address* by many devices. In practice, it does not matter how
 many NATs are connected in the chain and the IP network
 topology can be arranged into hierarchical and recursive struc-
-ture as shown in ﬁgure 1. The remaining beneﬁts provided
+ture as shown in figure 1. The remaining benefits provided
 by NAT are, generally, the result of the two main attributes
 mentioned before. In a very easy and cheap way, the *address
 independency* allows us to implement features like small site
@@ -1007,7 +1009,7 @@ and has the same "is zero" property on check if correct
     cleared to zero before delivering to final destination host, to prevent
     malicious cooperating hosts from guessing values to influence decisions on
     a (mis)configured first accepting router. If performance of such process
-    is very crititcal but Next Hop is cryptographically verified, then it's
+    is very critical but Next Hop is cryptographically verified, then it's
     usually enough to zero out just some bytes (one per several).
 
 TBD
