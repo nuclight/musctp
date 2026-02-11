@@ -7411,6 +7411,10 @@ and bit 1 if it is followed by count nibble
     type 8,9,a,b - 1..4 full 32-bit uncompressed follow
     type <11xx xxxx> = bitmap as above, then take N nibbles from stream of
     "padding" to make it whole number of integers
+  - 23.01.26 01:00 possible permutation before VarNibbles: first lowest
+    nibbles of every integer, then second low, and so on to highest ones, so
+    the tail likely will have many zeroes combined, but this scheme requires
+    storing original size and same width for all integers
 - 14.08.25 if we are fine with shorter integers than uint32_t - 24 bit - then
   a following scheme could be used: initial byte of chunk contains three
   numbers, 6*6*6=216 - lengths of three following integers, 1 to 6 nibbles;

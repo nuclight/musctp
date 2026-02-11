@@ -3865,6 +3865,209 @@ TBD 26.11.25 trying to implement `telegram_hash.edn` revealed need for:
 - 30.11.25 remembering 1-st April CBOR-TF7, CBAR could also be called, cf.
   Unicode, a CBOR Transformation Format
 
+TBD 17.01.26 on https://github.com/cbor-wg/cbor-dns/issues/13 table _V_ being
+too big - what if add only necessary? E.g. of 4 used references, they could be
+represented as the following tree:
+["com",
+    ["aws", "example"],
+    ["us-west-2", "elb", "amazonaws",
+      ["awseb-e-t-awsebloa-9999999999"],
+    ]
+]
+however, this adds 4 byte overhead for 4 array startings... Can reduce to flat
+array and bitmap whether array starts, and bstr when array ends, but for this
+example requires bits 0,1,3,6 set so it is 2-byte CBOR integer's overhead...
+- may be switching algorithms for small and bigger packets? on larger packets
+  overhead of two-byte references will be bigger quickly
+- compromise: mark as bstr those labels which should not be added to _V_ as
+  intermediate starters
+- anyway, using bstr as indicator looks fragile
+  - 19.01.26 if we restrict that in actual form domain-name must always start
+    and end with tstr (only intermediate could be bstr and so excluded from
+    table _V_), looks like this won't break anything (at the cost of slightly
+    bigger table, but not such bloat as in original version)
+- 18.01.26 but in CBAR/CBAPT we can use even substrings for atoms, e.g. "aws"
+  is repeated several times, so need to just try to put those full 4 FQDN's
+  and calculate - may be it will give better results even without 'nc'
+- 20.01.26 00:20 observe that DNS-CBOR uses original binary format for RDATA
+  if it is shorter than CBOR version - that is, parser for original format
+  must be included anyway even on constrained implementation. Also note that
+  CBAR is just one bstr form in CBAPT, but others are possible - so we can
+  create modified format for original DNS format with e.g. bitmap of which
+  fields are elided or shorter! And this can achieve additional compactness
+  because e.g. TTL in DNS-CBOR always has 1-byte overhead (0x18-0x1A)
+      0
+      0 1 2 3 4 5 6 7
+     +-+-+-+-+-+-+-+-+
+     |N|S|TYP|CLS|TTL|
+     +-+-+-+-+-+-+-+-+
+      | |  |   |   \__ length in bytes of TTL minus 1 (1/2/3/4 bytes)
+      | |  |   |
+      | |  |   `- 0=CHAOS, 1=IN, 2=one byte, 3=two bytes
+      | |  `- 0=AAAA, 1=A, 2=one byte, 3=two bytes
+      | `- rrset=true
+      `- NAME (label sequence) is present (not elided)
+   Label sequence is modified from classic DNS, low six bits is usually length
+   and two high bits are:
+   00 - normal label
+   01 - last label XXX or do suppressing here? but 63 much more than 16...
+   10 - reference number instead of length
+   11 - two bytes, reference number is thus 14 bits
+  After those, switching back to CBOR for one item - either bstr or array,
+  latter to be interpreted depending on rrset true/false as in DNS-CBOR-15
+  TBD this not includes domain-name / reverts to DNS-CBOR domain-name instead
+  of ours
+- 20.01.26 16:30 to be like CBAR, it must be entirely wrapped into a single
+  bytestring to save space on each bytestring: "awseb-e-t-awsebloa-9999999999"
+  from example above is longer than 23, and we return CBOR equivalent to
+  unpacked version of DNS-CBOR by stream parser. So our type byte must encode
+  not only elision of type/class/TTL at record start, but other things also,
+  including "repeat previous name/type/class/TTL" (instead of rrset=true),
+  and '[' and ']' and label start and may be even several 4-byte fields (for
+  SOA) if we'll have enough codepoint space; need type for <character-string>
+  (alas not set of: HINFO consists of exactly two distinct and unobsoleted
+  by RFC 8482) and generic RDLENGTH/RDATA (as new types format is not always
+  known), OPT (#6.141) and probably need escape to general CBOR item
+  TBD think about when record start is also equivalent to '], [' and when not
+- 20.01.26 17:45 so high 2 bits for category, can we find space for
+  pair of ints? also for binary strings, 0b11 is for refs, 0-60 or 1/2 byte,
+  number of <character-string> in sequence following next (each as in 1035);
+  a space for even 5 ints (SOA) ? and OPT RR has map...
+  - 21.01.26 00:35 if we need to encode array size at start of RR also, then
+    it can be 2 bytes (not worse than DNS-CBOR as it always have '[' and TTL
+    leading byte) so then no need to spend entire 6-bit range 0b01 for it,
+    just find a way to express in single byte "same as before" for rrset=true
+    and zone files (also need $TTL here)
+    - 01:15 make it literal '@' (64) and default $ORIGIN to be root so that
+      usual DNS queries/responses work as in dns-cbor-15: technically names
+      in it are relative due to elision of ""=. (root) but in zone file or
+      AXFR we can specify $ORIGIN so they'll become relative without need to
+      simple(0) or similar at end of each
+
+      0
+      0 1 2 3 4 5 6 7
+     +-+-+-+-+-+-+-+-+
+     |0 0|LabelLength| as in classic DNS
+     +-+-+-+-+-+-+-+-+
+
+      0
+      0 1 2 3 4 5 6 7
+     +-+-+-+-+-+-+-+-+
+     |0 1|0 0|0 0 0 0| '@' special label
+     +-+-+-+-+-+-+-+-+
+
+      0
+      0 1 2 3 4 5 6 7
+     +-+-+-+-+-+-+-+-+
+     |0 1|0 0|ArrSize| repeat previous Name/Class/TTL here
+     +-+-+-+-+-+-+-+-+
+
+     ArrSize's all 1's means indef start (as 0x9f in CBOR)
+
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |0 1|CLS|TYP|   TTL   |Arr size |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     TTL 0-26, then 1/2/3/4 bytes, 31=omitted (see zone files)
+
+     0x80-0x8c: generic CBOR array open
+
+     0x8d=141: EDNS OPT RR
+      0                   1                   2
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 0|0 0|1 1 0 1|P|V|R|L|RCODEHI|RCODE low (opt)|
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     P - udp-payload-size 2 bytes present
+     V - version 1 byte present
+     R - Reserved
+     L - RCODE low byte follows
+     then map follows in standard CBOR encoding
+
+    0x8e - escape to one CBOR element (may be tagged and compound)
+    0x8f - indef array start
+
+    0x90-0x9f: TODO single int, pair
+      0                   1
+      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+     |1 0 0 1|1 1|I1 |I2 |I3 |I4 |I5 |
+     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    TBD is it needed all five without undefs?
+
+
+    0xA0-0xBf: bstr 0-29 bytes, 30=1 byte len, 31=2 bytes len
+    0xC0-0xCF: sequence of 1 to 16 <character-string> follows
+    0xD0-0xF3: Label Reference in V
+    0xF4-0xF7: false/true/null/undefined
+    0xf8: 1 byte reference follows,
+    0xf9; 2 bytes reference follows
+    atoms as in CBAR, reserveds
+    0xff indef terminator
+- 21.01.26 13:00 for sequences, include them in array count or treat as
+  single? latter better when ArrSize is 13 max. but less friendly for stream
+  decoding to CBOR
+- 21.01.26 19:45 we cannot pull all three Type/Class/TTL to record start
+  because we must have some field of other type to denote <domain-name> end:
+  our labels are essentially relative
+- 22.01.26 00:00 codes 65-87 should be ok for "same as previous" case, what
+  make generic compression of original DNS data using VarNibbles, also
+  applicable to IPv6 addresses? that is, put TTL then Type then Class as in
+  DNS-CBOR, but in binary, and corresponding field is elided like in DNS-CBOR
+  if that string < 8 bytes... however, overhead is big, need to provide usual
+  CBOR integer and bytestring for cases when smaller
+  OPT untagged rcode=0 maxudp=0 DO=1: "." 0x64 0b1100 0 <4> 8 0 <5> 2 9 =6by
+  in DNS-CBOR: 2 byte tag, 3 byte flags, 1 byte map - equivalent!
+- 23.01.26 01:00 possible permutation before VarNibbles: first lowest nibbles
+  of every int, then second low, third, and highest ones, so the tail likely
+  will have many zeroes combined, but requires storing original size and same
+  width for all integers
+  - 01:40 this may have bad impact for IPv6 address so need a flag
+    0 | 6
+    1 | 8
+    2 | 10
+    3 | 12
+    4 | 14
+    5 | 16
+    6 | 18
+    7 | 20
+- 24.01.22 22:00 yet another compression format: take Bitmap Ranges idea on
+  original DNS wire format, but make two-bit for RLE: run of zero bytes, run
+  of literal bytes, an atom or several atoms, a reference to table _V_ (how
+  many in run of them? at most 2?), and a variant like "0|Bitmap" for just few
+  of them alternating; atoms/references are VarUInt30 in the stream, and
+  probably don't need to pull entire bitmap at start - just opcode byte as in
+  LZ-family; like in C-DNS we can predefine common type/class combinations
+  into _V_; Pyramint6 could be simplified to 0..51 and then in 16-units:
+  110011 - 51
+  110100 - 64  = 4*16
+  110101 - 80  = 5*16
+  ...
+  111111 - 240 = 15 *16
+- 31.01.26 02:45 ranges and RLE are likely to add overhead, but we can use
+  state machine idea from CBAR: don't need to put all possible types into one
+  opcode byte because we can infer state from position! That is, while we are
+  in a name, we now have all four combinations of 2 high bits available, so
+  now can easily mark intermediate labels to not be put into _V_ when not
+  needed, and TTL/type/class always have same order so may just put bitmap on
+  exactly them, may be restore 20.01.26 00:20
+- 02.02.26 22:00 for unknown RR types, compression may be specified by
+  sequence of numbers - length of bstr, length of domain-name, and so on
+  - 03.02.26 01:00 as labels could be self-terminating, could be reduced to
+    just 1 bit - have here domain-name or just bstr (e.g. two consecutive
+    names in SOA)
+    - 01:45 so VarInt with 1 bit and 2 (?) bits for type of bstr compression,
+      these may be same format for overall length - compression version; and
+      may be even sextets for this? coz lengths > 64k not required XXX bad
+
+
+
+to next cbor-packed/dns meeting:
+* recursive expansion of refs in table e.g. ["www", simple(0)]
+* draft-ietf-iotops-7228bis: need much more classes than S2 128-1279
+* is ip'192.0.0.2' valid for untagged bstr?
+
 
 TODO
 
